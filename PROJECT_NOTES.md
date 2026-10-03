@@ -195,8 +195,6 @@ Tenants, Users, Roles, Countries, Cities, Languages, CountryLanguages, Searches,
 
 ## 11. Remaining Open Questions
 1. Owner approved stack (section 7) but has doubts – collect and resolve them.
-2. Git remote URL for push.
-3. ICP scoring cost: one OpenAI call per lead per session (batching several leads per call reduces cost) – OK?
 
 ## 13. Build Progress
 - 2026-10-03: Solution scaffolded (`backend/DeepLead.sln`, 8 projects + 2 test projects, all packages added, builds with 0 warnings). DbUp migrator with scripts 0001–0006 (tenancy, geo, search/aspects/stages, companies + channels/people/socials/products, pages/evidence/logs, seed IN/AE + Indore). Not yet run against a database.
@@ -221,6 +219,8 @@ Tenants, Users, Roles, Countries, Cities, Languages, CountryLanguages, Searches,
 - 2026-10-03: Tech stack (section 7) **confirmed** by owner. Git repo initialised; owner allows pushing to a remote.
 - 2026-10-03: SQL Server Express -> page content kept out of DB.
 - 2026-10-03: Search input fully user-driven via Search Console (section 5a). OpenAI uses extended with **ICP lead scoring (per session)** and **related-keyword suggestions**. Top-N cities come from GeoNames population, not AI.
+- 2026-10-03: **ICP scoring deferred** – not built for now (ICP prompt field + `SearchLeadScores` table stay in schema for later; batching 10–20 leads per OpenAI call when enabled).
+- 2026-10-03: Git remote: https://github.com/bhumika-04/GoogleLeadScrapper (branch `main`).
 - 2026-10-03: Database = `LeadScrapper` on owner's SQL Server (remote). Connection key `ConnectionStrings:DefaultConnection`, stored in .NET user secrets (id `deeplead`) – never committed.
 - 2026-10-03: **Hybrid page handling approved** (replaces "Stage 4 rule-based only" and "store raw HTML"): rules first -> OpenAI JSON extraction only for relevant pages rules couldn't fully read -> JSON in DB -> cleaned text gzip on disk for 30 days, then deleted.
 - 2026-10-03: Exports: Excel + CSV only (no Google Sheets / no Google API).
