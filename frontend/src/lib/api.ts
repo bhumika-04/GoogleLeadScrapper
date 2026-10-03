@@ -4,6 +4,9 @@ import type {
   ConnectedAccount,
   Country,
   Platform,
+  Role,
+  Tenant,
+  UserListItem,
   CreateSearchRequest,
   Lead,
   LoginResponse,
@@ -91,6 +94,22 @@ export const api = {
   login: (email: string, password: string) =>
     json<LoginResponse>("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
   me: () => json<User>("/api/auth/me"),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    json<void>("/api/auth/change-password", { method: "POST", body: JSON.stringify({ currentPassword, newPassword }) }),
+
+  users: (tenantId?: number) => json<UserListItem[]>(`/api/users${tenantId ? `?tenantId=${tenantId}` : ""}`),
+  createUser: (body: { email: string; fullName: string; role: Role; password: string; tenantId?: number }) =>
+    json<UserListItem>("/api/users", { method: "POST", body: JSON.stringify(body) }),
+  updateUser: (id: number, body: { fullName?: string; role?: Role; isActive?: boolean }) =>
+    json<void>(`/api/users/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  resetPassword: (id: number, newPassword: string) =>
+    json<void>(`/api/users/${id}/reset-password`, { method: "POST", body: JSON.stringify({ newPassword }) }),
+
+  tenants: () => json<Tenant[]>("/api/tenants"),
+  createTenant: (body: { name: string; adminEmail: string; adminName: string; adminPassword: string }) =>
+    json<{ id: number }>("/api/tenants", { method: "POST", body: JSON.stringify(body) }),
+  updateTenant: (id: number, body: { name?: string; isActive?: boolean }) =>
+    json<void>(`/api/tenants/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
 
   countries: () => json<Country[]>("/api/geo/countries"),
   cities: (iso2: string, q: string, take = 15) =>

@@ -148,6 +148,29 @@ export type CompanyDetail = {
   facts: Fact[];
 };
 
+export type Role = "Admin" | "TenantAdmin" | "User";
+
+export type UserListItem = {
+  id: number;
+  tenantId: number;
+  email: string;
+  fullName: string;
+  role: Role;
+  isActive: boolean;
+  lastLoginAt: string | null;
+  createdAt: string;
+};
+
+export type Tenant = {
+  id: number;
+  name: string;
+  isActive: boolean;
+  userCount: number;
+  sessionCount: number;
+  leadCount: number;
+  createdAt: string;
+};
+
 export type Platform = "LinkedIn" | "Facebook" | "Instagram" | "IndiaMart" | "Justdial";
 
 export type AccountStatus = "ConnectRequested" | "WaitingForLogin" | "SaveRequested" | "Connected" | "Expired" | "Failed" | "Disconnected";

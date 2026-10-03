@@ -37,7 +37,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             {nav.filter((item) => !item.adminOnly || user.role !== "User").map((item) => {
               const active = item.href === "/searches"
                 ? pathname === "/searches" || (/^\/searches\/\d+/.test(pathname))
-                : pathname.startsWith(item.href);
+                : pathname === item.href || pathname.startsWith(item.href + "/");
               return (
                 <Link key={item.href} href={item.href}
                   className={`rounded-md px-3 py-1.5 text-sm transition ${active ? "bg-panel-2 text-ink" : "text-ink-dim hover:text-ink"}`}>
@@ -47,7 +47,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             })}
           </nav>
           <div className="ml-auto flex items-center gap-3 text-sm">
-            <span className="hidden text-ink-dim sm:inline">{user.fullName} · <span className="text-muted">{user.tenantName}</span></span>
+            <Link href="/account" className="hidden text-ink-dim hover:text-ink sm:inline" title="Account & password">
+              {user.fullName} · <span className="text-muted">{user.tenantName}</span>
+            </Link>
             <button onClick={logout} className="btn-ghost px-3 py-1.5">Sign out</button>
           </div>
         </div>

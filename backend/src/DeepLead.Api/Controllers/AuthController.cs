@@ -26,6 +26,20 @@ public sealed class AuthController(UserRepository users, JwtTokenService tokens)
     }
 
     [Authorize]
+    [HttpPost("change-password")]
+    public async Task<IActionResult> ChangePassword(ChangePasswordRequest request)
+    {
+        var hash = await users.GetPasswordHashAsync(User.UserId());
+        if (hash is null || !BCrypt.Net.BCrypt.Verify(request.CurrentPassword, hash))
+            return Conflict(new { message = "Current password is incorrect." });
+        if (request.NewPassword.Length < UsersController.MinPasswordLength)
+            return Conflict(new { message = $"New password must be at least {UsersController.MinPasswordLength} characters." });
+
+        await users.SetPasswordHashAsync(User.UserId(), BCrypt.Net.BCrypt.HashPassword(request.NewPassword));
+        return NoContent();
+    }
+
+    [Authorize]
     [HttpGet("me")]
     public async Task<ActionResult<UserDto>> Me()
     {

@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
 import { formatUtc } from "@/lib/format";
 import type { AccountStatus, ConnectedAccount, Platform } from "@/lib/types";
 
@@ -27,7 +26,6 @@ const STATUS_TEXT: Record<AccountStatus, string> = {
 const BUSY: AccountStatus[] = ["ConnectRequested", "WaitingForLogin", "SaveRequested"];
 
 export default function SettingsPage() {
-  const { user } = useAuth();
   const [accounts, setAccounts] = useState<ConnectedAccount[] | null>(null);
   const [labels, setLabels] = useState<Partial<Record<Platform, string>>>({});
   const [error, setError] = useState<string | null>(null);
@@ -53,16 +51,9 @@ export default function SettingsPage() {
     }
   }
 
-  if (user && user.role === "User") {
-    return <p className="py-16 text-center text-sm text-muted">Only admins can manage connected accounts.</p>;
-  }
-
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold">Settings</h1>
-        <p className="text-sm text-muted">Connected accounts let the worker read pages that need a login.</p>
-      </div>
+    <div className="space-y-6">
+      <p className="text-sm text-muted">Connected accounts let the worker read pages that need a login.</p>
 
       <div className="card space-y-2 border-warn/30 bg-warn/5 p-4 text-sm text-ink-dim">
         <p className="font-semibold text-warn">How connecting works</p>

@@ -249,6 +249,11 @@ Tenants, Users, Roles, Countries, Cities, Languages, CountryLanguages, Searches,
     Markup-agnostic extraction (profile links + card text); kept only when the card names the company. Empty result pages are
     snapshotted to `logs/linkedin/` for diagnosis. **Not yet verified against a real LinkedIn account** – owner to connect one.
   - Order per company: website / own IndiaMART page -> IndiaMART guess -> LinkedIn -> web search (only if still nobody).
+- 2026-10-03: Alternatives discussed and **set aside – staying with the original free Playwright plan**:
+  Google Places API (~$35/1,000 requests ≈ $1.75 per 1,000 businesses, max 60 results/query, no owner/email, storage limits in ToS),
+  Gemini API grounding with Google Search ($14/1,000 after 5,000 free/month; Google "AI Mode" itself has no API),
+  Chrome extension (Manifest V3) using the user's own logged-in browser (good for LinkedIn/Facebook, but needs Chrome open on a PC).
+  Revisit if blocking becomes the bottleneck.
 - Next: owner connects a dedicated LinkedIn account and runs a session (verify extraction); Facebook page search; full-list Maps test
   (~120 cap) + area splitting; user management.
 

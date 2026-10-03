@@ -45,6 +45,16 @@ builder.Services
             RoleClaimType = System.Security.Claims.ClaimTypes.Role,
             ClockSkew = TimeSpan.FromMinutes(1),
         };
+        // Deactivating a user or workspace takes effect immediately, not when the token expires.
+        o.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = async ctx =>
+            {
+                var repo = ctx.HttpContext.RequestServices.GetRequiredService<UserRepository>();
+                if (!await repo.IsActiveAsync(ctx.Principal!.UserId()))
+                    ctx.Fail("User or workspace is deactivated.");
+            },
+        };
     });
 builder.Services.AddAuthorization();
 
