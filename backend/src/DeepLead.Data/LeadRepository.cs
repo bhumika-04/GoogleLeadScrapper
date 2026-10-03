@@ -75,11 +75,18 @@ public sealed class LeadRepository(SqlConnectionFactory db)
 
         if (lead.PhoneE164 is not null)
         {
-            await c.ExecuteAsync("""
-                IF NOT EXISTS (SELECT 1 FROM dbo.CompanyChannels WHERE CompanyId = @companyId AND ChannelType = 'Phone' AND NormalizedValue = @normalized)
-                    INSERT INTO dbo.CompanyChannels (CompanyId, ChannelType, Value, NormalizedValue, PhoneKind, IsValid, SourceUrl)
-                    VALUES (@companyId, 'Phone', @raw, @normalized, @kind, @valid, @source);
-                """, new { companyId, raw = l.Phone, normalized = lead.PhoneE164, kind = lead.PhoneKind, valid = lead.PhoneValid, source = l.MapsUrl }, tx);
+            await c.ExecuteAsync($"""
+                UPDATE dbo.CompanyChannels SET {SourceTracking.MergeDomainsSet}
+                WHERE CompanyId = @companyId AND ChannelType = 'Phone' AND NormalizedValue = @normalized;
+
+                IF @@ROWCOUNT = 0
+                    INSERT INTO dbo.CompanyChannels (CompanyId, ChannelType, Value, NormalizedValue, PhoneKind, IsValid, SourceUrl, SourceDomains)
+                    VALUES (@companyId, 'Phone', @raw, @normalized, @kind, @valid, @source, @domain);
+                """, new
+            {
+                companyId, raw = l.Phone, normalized = lead.PhoneE164, kind = lead.PhoneKind, valid = lead.PhoneValid, source = l.MapsUrl,
+                domain = SourceTracking.DomainOf(l.MapsUrl),
+            }, tx);
         }
 
         if (lead.SocialUrl is not null)
@@ -90,6 +97,7 @@ public sealed class LeadRepository(SqlConnectionFactory db)
                 """, new { companyId, platform = lead.SocialPlatform, url = lead.SocialUrl }, tx);
         }
 
+        await c.ExecuteAsync(LeadScore.RecomputeSql, new { companyId }, tx);
         await tx.CommitAsync(ct);
         return companyId.Value;
     }
@@ -118,7 +126,10 @@ public sealed class LeadRepository(SqlConnectionFactory db)
                (SELECT STRING_AGG(p.FullName + COALESCE(' (' + p.Designation + ')', ''), '; ')
                        WITHIN GROUP (ORDER BY p.IsOwner DESC, p.IsDecisionMaker DESC, p.FullName)
                 FROM dbo.CompanyPeople p WHERE p.CompanyId = co.Id) AS People,
-               (SELECT COUNT(*) FROM dbo.CompanyPeople p WHERE p.CompanyId = co.Id) AS PeopleCount
+               (SELECT COUNT(*) FROM dbo.CompanyPeople p WHERE p.CompanyId = co.Id) AS PeopleCount,
+               CAST(co.LeadScore AS INT) AS LeadScore,
+               (SELECT COUNT(*) FROM dbo.CompanyChannels ch WHERE ch.CompanyId = co.Id AND ch.SourceCount >= 2)
+             + (SELECT COUNT(*) FROM dbo.CompanyPeople p WHERE p.CompanyId = co.Id AND p.SourceCount >= 2) AS VerifiedCount
         """;
 
     public async Task<IReadOnlyList<PersonExportRow>> GetPeopleForExportAsync(int tenantId, long searchId, long? aspectId)
@@ -127,7 +138,7 @@ public sealed class LeadRepository(SqlConnectionFactory db)
         var rows = await c.QueryAsync<PersonExportRow>("""
             SELECT k.Keyword, ci.AsciiName AS City, co.Name AS Company,
                    p.FullName, p.Designation, p.IsOwner, p.IsDecisionMaker, p.Phone, p.Email,
-                   p.LinkedInUrl, p.FacebookUrl, p.InstagramUrl, p.Source, p.SourceUrl
+                   p.LinkedInUrl, p.FacebookUrl, p.InstagramUrl, p.Source, p.SourceUrl, CAST(p.SourceCount AS INT) AS SourceCount
             FROM dbo.AspectLeads al
             JOIN dbo.SearchAspects sa ON sa.Id = al.AspectId
             JOIN dbo.Searches s ON s.Id = sa.SearchId
@@ -141,15 +152,23 @@ public sealed class LeadRepository(SqlConnectionFactory db)
         return rows.AsList();
     }
 
-    public async Task<PagedResult<LeadRowDto>> GetLeadsAsync(int tenantId, long searchId, long? aspectId, string? search, int page, int pageSize)
+    public async Task<PagedResult<LeadRowDto>> GetLeadsAsync(int tenantId, long searchId, long? aspectId, string? search, int page, int pageSize, string? sort = null)
     {
         var q = string.IsNullOrWhiteSpace(search) ? null : "%" + search.Trim() + "%";
         await using var c = await db.OpenAsync();
         var p = new { tenantId, searchId, aspectId, q, offset = (page - 1) * pageSize, pageSize };
 
+        // Whitelisted sort orders only (never interpolate user input into SQL).
+        var orderBy = sort switch
+        {
+            "score" => "ORDER BY co.LeadScore DESC, sa.Sequence, al.MapsRank",
+            "reviews" => "ORDER BY co.ReviewCount DESC, co.Rating DESC, sa.Sequence",
+            _ => "ORDER BY sa.Sequence, al.MapsRank",
+        };
+
         var total = await c.ExecuteScalarAsync<int>("SELECT COUNT(*) " + LeadFrom, p);
         var rows = await c.QueryAsync<LeadRowDto>(
-            LeadSelect + "\n" + LeadFrom +" ORDER BY sa.Sequence, al.MapsRank OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY", p);
+            LeadSelect + "\n" + LeadFrom + $" {orderBy} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY", p);
         return new PagedResult<LeadRowDto>(rows.AsList(), total, page, pageSize);
     }
 

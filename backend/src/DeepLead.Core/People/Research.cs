@@ -7,7 +7,8 @@ public sealed record CompanyToResearch(
     string City,
     string? Region,
     string CountryIso2,
-    string? Website);
+    string? Website,
+    string? FacebookUrl = null);
 
 public sealed record PersonFinding
 {
@@ -23,9 +24,15 @@ public sealed record PersonFinding
     public required string SourceUrl { get; init; }
     /// <summary>'Website', 'IndiaMart', 'LinkedInSearch', ...</summary>
     public required string Source { get; init; }
+    /// <summary>Other pages that showed the same person in this run (evidence for "Verified").</summary>
+    public IReadOnlyList<string> AlsoSeenAt { get; init; } = [];
 }
 
-public sealed record ChannelFinding(string Type, string Value, string NormalizedValue, string? PhoneKind, bool? IsValid, string? Note, string SourceUrl);
+public sealed record ChannelFinding(string Type, string Value, string NormalizedValue, string? PhoneKind, bool? IsValid, string? Note, string SourceUrl)
+{
+    /// <summary>Other pages that showed the same phone/email in this run (evidence for "Verified").</summary>
+    public IReadOnlyList<string> AlsoSeenAt { get; init; } = [];
+}
 
 public sealed record SocialFinding(string Platform, string Url);
 
@@ -54,4 +61,5 @@ public static class FactFields
     public const string LegalStatus = "LegalStatus";
     public const string YearEstablished = "YearEstablished";
     public const string NatureOfBusiness = "NatureOfBusiness";
+    public const string FacebookFollowers = "FacebookFollowers";
 }

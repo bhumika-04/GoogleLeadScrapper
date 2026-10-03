@@ -25,7 +25,9 @@ public static partial class WebsiteExtractor
 
     // Role then name ("Proprietor : Mr. Ramesh Jain") or name then role ("Ramesh Jain (Director)", "Ramesh Jain - Founder").
     private const string Roles = @"(?:Managing\s+Director|Director|Proprietor|Proprietress|Owner|Founder|Co-?Founder|CEO|Chief\s+Executive\s+Officer|Chairman|Chairperson|Partner|Managing\s+Partner|MD)";
-    private const string Name = @"(?:(?:Mr|Mrs|Ms|Dr|Shri|Smt|Er)\.?\s+)?[A-Z][a-zA-Z]+(?:\s+[A-Z]\.?)?(?:\s+[A-Z][a-zA-Z]+){1,2}";
+    // A name never crosses a line break ([ \t] only): "Contact Us\nH. Badri - Founder" must give "H. Badri", not "Us H. Badri".
+    // First part: an initial ("H." / "H ") or a capitalised word; optional middle initial; then a surname (+ optional second surname).
+    private const string Name = @"(?:(?:Mr|Mrs|Ms|Dr|Shri|Smt|Er)\.?[ \t]+)?(?:[A-Z](?:\.[ \t]*|[ \t]+)|[A-Z][a-z]+[ \t]+)(?:[A-Z]\.?[ \t]+)?[A-Z][a-zA-Z]+(?:[ \t]+[A-Z][a-zA-Z]+)?";
 
     [GeneratedRegex(@"(?<role>" + Roles + @")\s*[:\-–]\s*(?<name>" + Name + ")")]
     private static partial Regex RoleThenName();
@@ -36,7 +38,13 @@ public static partial class WebsiteExtractor
     private static readonly string[] SocialHosts = ["linkedin.com", "facebook.com", "instagram.com", "youtube.com", "youtu.be", "twitter.com", "x.com"];
     private static readonly string[] ContactKeywords = ["contact", "about", "team", "management", "leadership", "director", "founder", "who-we-are", "our-story", "company-profile", "profile"];
     private static readonly string[] IgnoredEmailSuffixes = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", "example.com", "sentry.io", "wixpress.com", "domain.com"];
-    private static readonly string[] NotNames = ["Our", "The", "Contact", "About", "Read", "View", "More", "Home", "Call", "Email", "Message", "Click", "Team", "Company", "Private", "Limited"];
+    // Menu/boilerplate words: a "name" containing any of these is page furniture, not a person.
+    private static readonly HashSet<string> NotNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Our", "The", "Us", "Contact", "About", "Read", "View", "More", "Home", "Call", "Email", "Mail", "Message", "Click", "Team",
+        "Company", "Private", "Limited", "Welcome", "Menu", "Services", "Service", "Products", "Product", "Gallery", "Follow", "Get",
+        "Office", "Address", "Phone", "Copyright", "All", "Rights", "Reserved", "Best", "Top", "Leading", "Printing", "Press", "Quick", "Links",
+    };
 
     public static WebsitePageData Extract(string html, string pageUrl)
     {
@@ -109,7 +117,8 @@ public static partial class WebsiteExtractor
         var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
         // Single lines, plus each pair of adjacent lines ("Proprietor:" and "Ramesh Jain" in separate elements).
-        var candidates = lines.Concat(lines.Zip(lines.Skip(1), (a, b) => $"{a} {b}"));
+        // Pairs keep their line break, and Name can't cross it.
+        var candidates = lines.Concat(lines.Zip(lines.Skip(1), (a, b) => $"{a}\n{b}"));
         foreach (var line in candidates)
         {
             if (line.Length > 400)
@@ -119,14 +128,23 @@ public static partial class WebsiteExtractor
                 foreach (Match m in regex.Matches(line))
                 {
                     var name = Regex.Replace(m.Groups["name"].Value.Trim(), @"\s+", " ");
-                    var firstWord = Regex.Replace(name, @"^(Mr|Mrs|Ms|Dr|Shri|Smt|Er)\.?\s+", "").Split(' ')[0];
-                    if (NotNames.Contains(firstWord, StringComparer.OrdinalIgnoreCase))
+                    var words = Regex.Replace(name, @"^(Mr|Mrs|Ms|Dr|Shri|Smt|Er)\.?\s+", "").Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    if (words.Any(w => NotNames.Contains(w.TrimEnd('.'))))
                         continue;
                     found.TryAdd(name, new RoleMention(name, Regex.Replace(m.Groups["role"].Value, @"\s+", " "), line.Trim()));
                 }
             }
         }
         return found.Values.ToList();
+    }
+
+    /// <summary>Valid-looking emails in free text (same filters as page extraction).</summary>
+    public static IReadOnlyList<string> FindEmails(string text)
+    {
+        var emails = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Match m in Email().Matches(text))
+            AddEmail(emails, m.Value);
+        return emails.ToList();
     }
 
     private static string SafeUnescape(string value)

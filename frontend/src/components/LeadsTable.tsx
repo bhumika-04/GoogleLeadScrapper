@@ -1,4 +1,5 @@
 import type { Lead } from "@/lib/types";
+import { ScoreBadge } from "@/components/ScoreBadge";
 
 const socialLabel = (url: string) => {
   const u = url.toLowerCase();
@@ -24,6 +25,7 @@ export function LeadsTable({ leads, showAspect, onOpen }: Props) {
         <thead>
           <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
             <th className="px-4 py-2.5 font-medium">#</th>
+            <th className="px-3 py-2.5 font-medium" title="Lead score 0–100">Score</th>
             <th className="px-4 py-2.5 font-medium">Company</th>
             <th className="px-4 py-2.5 font-medium">Owner &amp; team</th>
             <th className="px-4 py-2.5 font-medium">Phone / email</th>
@@ -40,6 +42,10 @@ export function LeadsTable({ leads, showAspect, onOpen }: Props) {
               <tr key={`${l.aspectId}-${l.companyId}`} onClick={() => onOpen(l)}
                 className="cursor-pointer border-b border-line/50 align-top last:border-0 hover:bg-panel-2/60">
                 <td className="px-4 py-2.5 tabular-nums text-muted">{l.mapsRank ?? "—"}</td>
+                <td className="px-3 py-2.5">
+                  <ScoreBadge score={l.leadScore} />
+                  {l.verifiedCount > 0 && <div className="mt-1 text-[10px] font-semibold text-ok" title="Phones/emails/people confirmed by 2+ sites">✓ {l.verifiedCount}</div>}
+                </td>
                 <td className="max-w-[240px] px-4 py-2.5">
                   <div className="font-medium text-ink">{l.name}</div>
                   <div className="text-xs text-muted">

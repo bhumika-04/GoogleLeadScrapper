@@ -57,8 +57,8 @@ public sealed partial class SearchesController(
 
     [HttpGet("{id:long}/leads")]
     public async Task<PagedResult<LeadRowDto>> Leads(long id, [FromQuery] long? aspectId, [FromQuery] string? q,
-        [FromQuery] int page = 1, [FromQuery] int pageSize = 50) =>
-        await leads.GetLeadsAsync(User.TenantId(), id, aspectId, q, Math.Max(page, 1), Math.Clamp(pageSize, 10, 500));
+        [FromQuery] int page = 1, [FromQuery] int pageSize = 50, [FromQuery] string? sort = null) =>
+        await leads.GetLeadsAsync(User.TenantId(), id, aspectId, q, Math.Max(page, 1), Math.Clamp(pageSize, 10, 500), sort);
 
     /// <summary>Company card: people (owner first), phones/emails, socials, sourced facts.</summary>
     [HttpGet("{id:long}/companies/{companyId:long}")]

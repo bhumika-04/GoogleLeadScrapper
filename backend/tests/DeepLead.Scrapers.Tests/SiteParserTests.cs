@@ -49,6 +49,20 @@ public class SiteParserTests
     }
 
     [Fact]
+    public void FindRoleMentions_NameDoesNotCrossLineBreak()
+    {
+        var data = WebsiteExtractor.Extract("<div><a>Contact Us</a><p>H. Badri - Founder</p></div>", "https://x.in/");
+        var mention = Assert.Single(data.RoleMentions);
+        Assert.Equal("H. Badri", mention.Name);
+    }
+
+    [Theory]
+    [InlineData("Proprietor: H Barodawala", "H Barodawala")]
+    [InlineData("Rahul K. Mehta (Director)", "Rahul K. Mehta")]
+    public void FindRoleMentions_AcceptsInitials(string text, string name) =>
+        Assert.Equal(name, Assert.Single(WebsiteExtractor.FindRoleMentions(text)).Name);
+
+    [Fact]
     public void FindRoleMentions_IgnoresMenuText() =>
         Assert.Empty(WebsiteExtractor.FindRoleMentions("Contact Us - Founder"));
 
@@ -144,6 +158,34 @@ public class SiteParserTests
     [Fact]
     public void LinkedIn_IgnoresCompanyPages() =>
         Assert.Null(LinkedInResultParser.Parse("https://www.linkedin.com/company/jai-ma-graphics", "Jai Ma Graphics | LinkedIn", ""));
+
+    [Fact]
+    public void Facebook_ParsesIntroAndFollowers()
+    {
+        const string text = "Log in\nIndiaMART\n340K followers • 10 following\nPosts\nAbout\nIntro\nIndia's largest online B2B marketplace.\nPage · App page\n+91 96969 69696\nmarketing@indiamart.com\nindiamart.com\nSee all photos\nSome post text 0731-4047882";
+        var (outcome, page) = FacebookPageReader.Parse("https://www.facebook.com/IndiaMART/", "IndiaMART | Facebook", text, ["https://www.youtube.com/@indiamart"]);
+        Assert.Equal(FacebookReadOutcome.Ok, outcome);
+        Assert.Equal("IndiaMART", page!.Name);
+        Assert.Equal(340_000, page.Followers);
+        Assert.Contains("+91 96969 69696", page.IntroText);
+        Assert.DoesNotContain("0731-4047882", page.IntroText);   // post text below the Intro block is excluded
+    }
+
+    [Fact]
+    public void Facebook_DetectsMissingPage() =>
+        Assert.Equal(FacebookReadOutcome.NotFound,
+            FacebookPageReader.Parse("https://www.facebook.com/x", "Facebook", "This content isn't available right now", []).Item1);
+
+    [Theory]
+    [InlineData("1,234 followers", 1234)]
+    [InlineData("2.5K followers", 2500)]
+    [InlineData("1.2M likes", 1_200_000)]
+    public void Facebook_ParsesFollowerCounts(string text, int expected) => Assert.Equal(expected, FacebookPageReader.ParseFollowers(text));
+
+    [Fact]
+    public void Facebook_GuessesPageUrls() =>
+        Assert.Equal(["https://www.facebook.com/jaimagraphics", "https://www.facebook.com/jaimagraphicsindore"],
+            FacebookPageReader.GuessPageUrls("Jai Ma Graphics", "Indore"));
 
     [Fact]
     public void DuckDuckGo_ParsesResultsAndUnwrapsRedirects()

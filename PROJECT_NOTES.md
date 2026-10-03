@@ -263,7 +263,19 @@ Tenants, Users, Roles, Countries, Cities, Languages, CountryLanguages, Searches,
   saved at list level (no page open), drops results > (span×1.5 + 6 km) from the city centre. Live check: one area 4 km east returned
   results averaging 1.6 km from its centre, 2 of its top 12 were not in the 117-result city list. Settings: Scraping:AreaSplitting*.
   Cost: a full 3×3 split can add 30–90 min per capped combination (mostly list scrolling; known places are skipped).
-- Next: owner connects a dedicated LinkedIn account and runs a session (verify extraction); Facebook page search.
+- 2026-10-03: **Stage 4 Facebook + Stage 5 Verified & Lead score** (migration 0009).
+  - Facebook business pages read without login (or with the connected Facebook account): intro phone/email, website, Instagram/YouTube
+    links, follower count; English UI forced (locale=en_US). Page from website/Maps links, else name guesses verified by page name.
+  - **Justdial parked**: listing/detail pages return an empty 14-byte response / HTTP2 reset to automated clients. Revisit via a connected
+    Justdial account in a visible browser.
+  - Verified: phones/emails/people keep the distinct sites that showed them (SourceDomains/SourceCount); 2+ sites = "✓ Verified";
+    facts verified when the same value comes from 2+ sites. Live: Jai Ma Graphics mobile verified by Google Maps + its website.
+  - Lead score 0–100 (rule-based): valid mobile 20 / other phone 12, valid email 15, owner 20, person with direct contact/LinkedIn 10,
+    website 10, socials 5, rating ≥4 & ≥20 reviews 10 (any rating 4), anything verified 10. Recomputed on every save; existing 20 backfilled.
+    UI: Score column, "Best leads first" sort, Verified tags in the drawer; Excel: Lead score + Verified items, People sheet "Confirmed by sites".
+  - Bug found live and fixed: website name extraction joined text across lines ("Contact Us" + "H. Badri – Founder" -> "Us H. Badri");
+    names can no longer cross a line break, may start with an initial, and any menu word rejects the candidate.
+- Next: owner connects a dedicated LinkedIn account and runs a session (verify extraction); OpenAI key for page extraction + native language.
 
 ## 12. Decisions Log
 - 2026-10-01: Requirements answers received; stack proposal drafted (section 7).

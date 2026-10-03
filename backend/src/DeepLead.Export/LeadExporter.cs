@@ -12,26 +12,26 @@ public static class LeadExporter
 
     private static readonly string[] Headers =
     [
-        "Keyword", "City", "Rank", "Company", "Category", "Owner", "Core team", "Phones", "Emails", "Website", "Social profiles",
+        "Keyword", "City", "Rank", "Lead score", "Verified items", "Company", "Category", "Owner", "Core team", "Phones", "Emails", "Website", "Social profiles",
         "Team size", "Turnover", "GSTIN", "Address", "Rating", "Reviews", "Status", "Latitude", "Longitude", "Google Maps", "Found at (UTC)",
     ];
 
     private static readonly string[] PeopleHeaders =
     [
         "Keyword", "City", "Company", "Name", "Designation", "Owner", "Decision maker", "Phone", "Email",
-        "LinkedIn", "Facebook", "Instagram", "Found via", "Source page",
+        "LinkedIn", "Facebook", "Instagram", "Found via", "Confirmed by sites", "Source page",
     ];
 
     private static object?[] ToCells(LeadRowDto r) =>
     [
-        r.Keyword, r.City, r.MapsRank, r.Name, r.Category, r.OwnerName, r.People, r.Phones, r.Emails, r.Website, r.Socials,
+        r.Keyword, r.City, r.MapsRank, r.LeadScore, r.VerifiedCount, r.Name, r.Category, r.OwnerName, r.People, r.Phones, r.Emails, r.Website, r.Socials,
         r.TeamSize, r.Turnover, r.Gstin, r.Address, r.Rating, r.ReviewCount, r.BusinessStatus, r.Latitude, r.Longitude, r.MapsUrl, r.FoundAt,
     ];
 
     private static object?[] ToCells(PersonExportRow p) =>
     [
         p.Keyword, p.City, p.Company, p.FullName, p.Designation, p.IsOwner ? "Yes" : "", p.IsDecisionMaker ? "Yes" : "", p.Phone, p.Email,
-        p.LinkedInUrl, p.FacebookUrl, p.InstagramUrl, p.Source, p.SourceUrl,
+        p.LinkedInUrl, p.FacebookUrl, p.InstagramUrl, p.Source, p.SourceCount, p.SourceUrl,
     ];
 
     /// <summary>

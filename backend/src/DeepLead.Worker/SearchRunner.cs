@@ -39,6 +39,11 @@ public sealed class ScrapingOptions
     public int LinkedInMaxDelaySeconds { get; init; } = 50;
     /// <summary>A visible (non-headless) browser is less likely to be flagged by LinkedIn.</summary>
     public bool LinkedInHeadless { get; init; }
+
+    /// <summary>Public Facebook business pages (connected account used when present).</summary>
+    public bool FacebookEnabled { get; init; } = true;
+    public int FacebookMinDelaySeconds { get; init; } = 8;
+    public int FacebookMaxDelaySeconds { get; init; } = 16;
 }
 
 /// <summary>
@@ -100,6 +105,8 @@ public sealed class SearchRunner(
         // The tenant's LinkedIn account (if connected) is opened lazily on the first Stage 2 lookup.
         await using var linkedIn = new WorkerLinkedInLookup(search.TenantId, accounts, secrets, options, logger);
         _linkedIn = linkedIn;
+        await using var facebook = new WorkerFacebookLookup(search.TenantId, accounts, secrets, options, logger);
+        _facebook = facebook;
 
         var failed = 0;
         foreach (var aspect in aspects)
@@ -122,6 +129,7 @@ public sealed class SearchRunner(
 
     // The runner handles one session at a time, so the current run's LinkedIn lookup can live in a field.
     private WorkerLinkedInLookup? _linkedIn;
+    private WorkerFacebookLookup? _facebook;
 
     private async Task<AspectOutcome> RunAspectWithRetryAsync(SearchRunInfo search, AspectRunInfo aspect, GoogleMapsScraper scraper, CancellationToken ct)
     {
@@ -262,7 +270,7 @@ public sealed class SearchRunner(
 
             try
             {
-                var research = await discovery.ResearchAsync(company, ct, _linkedIn);
+                var research = await discovery.ResearchAsync(company, ct, _linkedIn, _facebook);
                 await people.SaveResearchAsync(company.CompanyId, research, ct);
                 if (research.SearchSkipped)
                     partial++;

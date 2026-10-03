@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using DeepLead.Core;
 using DeepLead.Core.People;
 using DeepLead.Core.Text;
@@ -24,7 +25,8 @@ public sealed class PeopleDiscovery(IWebSearch search, PageFetcher fetcher, Indi
     private static readonly string[] OwnerRoles = ["owner", "proprietor", "proprietress", "founder", "ceo", "chief executive", "managing director", "chairman", "chairperson", "managing partner"];
     private static readonly string[] DecisionRoles = ["director", "partner", "head", "president", "vice president", "vp", "general manager", "gm", "cto", "cfo", "coo", "manager"];
 
-    public async Task<CompanyResearch> ResearchAsync(CompanyToResearch company, CancellationToken ct, ILinkedInLookup? linkedIn = null)
+    public async Task<CompanyResearch> ResearchAsync(CompanyToResearch company, CancellationToken ct,
+        ILinkedInLookup? linkedIn = null, IFacebookLookup? facebook = null)
     {
         var research = new CompanyResearch();
         var match = new CompanyMatcher(company.Name, company.City);
@@ -46,6 +48,10 @@ public sealed class PeopleDiscovery(IWebSearch search, PageFetcher fetcher, Indi
             research.SearchSkipped = true;
             logger.LogWarning("IndiaMART skipped for {Company}: {Reason}", company.Name, ex.Message);
         }
+
+        // 2b. Facebook business page: intro phone/email/website + follower count.
+        if (facebook is not null)
+            await ReadFacebookAsync(company, match, facebook, research, ct);
 
         // 3. LinkedIn people search (connected account).
         if (linkedIn is not null)
@@ -232,6 +238,45 @@ public sealed class PeopleDiscovery(IWebSearch search, PageFetcher fetcher, Indi
         return true;
     }
 
+    // ---------------- Facebook page ----------------
+
+    private async Task ReadFacebookAsync(CompanyToResearch company, CompanyMatcher match, IFacebookLookup facebook, CompanyResearch research, CancellationToken ct)
+    {
+        // Pages linked from the website / Maps are trusted; guessed addresses must show this company's name.
+        var linked = research.Socials.Where(s => s.Platform == "Facebook").Select(s => s.Url)
+            .Concat(company.FacebookUrl is { } known ? [known] : [])
+            .Where(u => !Regex.IsMatch(u, @"/(groups|posts|events|photos|watch|sharer)/", RegexOptions.IgnoreCase))
+            .Select(u => (Url: u, Trusted: true));
+        var guessed = FacebookPageReader.GuessPageUrls(company.Name, company.City).Select(u => (Url: u, Trusted: false));
+
+        foreach (var (url, trusted) in linked.Concat(guessed).DistinctBy(c => c.Url.TrimEnd('/').ToLowerInvariant()).Take(3))
+        {
+            var result = await facebook.ReadPageAsync(url, ct);
+            if (result is null)
+                return;   // Facebook unavailable for this run (login wall)
+            var (outcome, page) = result.Value;
+            research.PagesVisited++;
+            if (outcome != FacebookReadOutcome.Ok || page is null)
+                continue;
+            if (!trusted && !match.NameMatches(page.Name))
+                continue;
+
+            var pageUrl = Regex.Replace(page.Url, @"[?&]locale=[^&]*", "").TrimEnd('?', '/');
+            research.Socials.Add(new SocialFinding("Facebook", pageUrl));
+
+            foreach (var p in PhoneExtractor.Find(page.IntroText, company.CountryIso2))
+                research.Channels.Add(new ChannelFinding("Phone", p.E164, p.E164, p.Kind, true, "Facebook page intro", pageUrl));
+            foreach (var email in WebsiteExtractor.FindEmails(page.IntroText))
+                research.Channels.Add(new ChannelFinding("Email", email, email, null, null, null, pageUrl));
+            foreach (var link in page.ExternalLinks)
+                if (SocialPlatformOf(link) is { } platform and not "Facebook")
+                    research.Socials.Add(new SocialFinding(platform, CleanSocialUrl(link)));
+            if (page.Followers is { } followers)
+                research.Facts.Add(new FactFinding(FactFields.FacebookFollowers, followers.ToString(), pageUrl, $"{followers} followers", "Facebook"));
+            return;
+        }
+    }
+
     // ---------------- LinkedIn (connected account) ----------------
 
     private async Task SearchLinkedInAsync(CompanyToResearch company, CompanyMatcher match, ILinkedInLookup linkedIn, CompanyResearch research, CancellationToken ct)
@@ -292,12 +337,19 @@ public sealed class PeopleDiscovery(IWebSearch search, PageFetcher fetcher, Indi
                 InstagramUrl = a.InstagramUrl ?? b.InstagramUrl,
                 Phone = a.Phone ?? b.Phone,
                 Email = a.Email ?? b.Email,
+                AlsoSeenAt = a.AlsoSeenAt.Append(b.SourceUrl).Concat(b.AlsoSeenAt).Where(u => u != a.SourceUrl).Distinct().ToList(),
             }))
             .ToList();
         research.People.Clear();
         research.People.AddRange(merged);
 
-        var channels = research.Channels.DistinctBy(c => (c.Type, c.NormalizedValue)).ToList();
+        var channels = research.Channels
+            .GroupBy(c => (c.Type, c.NormalizedValue))
+            .Select(g => g.First() with
+            {
+                AlsoSeenAt = g.Skip(1).Select(c => c.SourceUrl).Where(u => u != g.First().SourceUrl).Distinct().ToList(),
+            })
+            .ToList();
         research.Channels.Clear();
         research.Channels.AddRange(channels);
 

@@ -132,10 +132,11 @@ export const api = {
   saveAccount: (platform: Platform) => json<void>(`/api/settings/accounts/${platform}/save`, { method: "POST" }),
   disconnectAccount: (platform: Platform) => json<void>(`/api/settings/accounts/${platform}/disconnect`, { method: "POST" }),
 
-  leads: (id: number, opts: { aspectId?: number | null; q?: string; page: number; pageSize: number }) => {
+  leads: (id: number, opts: { aspectId?: number | null; q?: string; page: number; pageSize: number; sort?: string }) => {
     const p = new URLSearchParams({ page: String(opts.page), pageSize: String(opts.pageSize) });
     if (opts.aspectId) p.set("aspectId", String(opts.aspectId));
     if (opts.q) p.set("q", opts.q);
+    if (opts.sort) p.set("sort", opts.sort);
     return json<Paged<Lead>>(`/api/searches/${id}/leads?${p}`);
   },
 

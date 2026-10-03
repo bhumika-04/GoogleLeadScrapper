@@ -23,14 +23,15 @@ export default function SessionPage() {
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [openCompany, setOpenCompany] = useState<number | null>(null);
 
   const loadDetail = useCallback(() => api.search(id).then(setDetail).catch((e) => setError(e.message)), [id]);
   const loadLeads = useCallback(
-    () => api.leads(id, { aspectId, q: debouncedQuery, page, pageSize: PAGE_SIZE }).then(setLeads).catch((e) => setError(e.message)),
-    [id, aspectId, debouncedQuery, page],
+    () => api.leads(id, { aspectId, q: debouncedQuery, page, pageSize: PAGE_SIZE, sort }).then(setLeads).catch((e) => setError(e.message)),
+    [id, aspectId, debouncedQuery, page, sort],
   );
 
   useEffect(() => { loadDetail(); }, [loadDetail]);
@@ -140,7 +141,12 @@ export default function SessionPage() {
               {selectedAspect ? `${selectedAspect.keyword} — ${selectedAspect.city}` : "All leads"}
               {leads && <span className="ml-2 font-normal text-muted">{leads.total.toLocaleString()}</span>}
             </h2>
-            <input className="field ml-auto w-64 py-1.5 text-sm" placeholder="Filter by name, category, address…"
+            <select className="field ml-auto w-44 py-1.5 text-sm" value={sort} onChange={(e) => { setSort(e.target.value); setPage(1); }} aria-label="Sort leads">
+              <option value="">Maps order</option>
+              <option value="score">Best leads first</option>
+              <option value="reviews">Most reviews first</option>
+            </select>
+            <input className="field w-64 py-1.5 text-sm" placeholder="Filter by name, category, address…"
               value={query} onChange={(e) => setQuery(e.target.value)} />
           </div>
           <LeadsTable leads={leads?.items ?? null} showAspect={!selectedAspect} onOpen={(l) => setOpenCompany(l.companyId)} />

@@ -16,6 +16,9 @@ public sealed record PersonDto
     public string? InstagramUrl { get; init; }
     public string? Source { get; init; }
     public string SourceUrl { get; init; } = "";
+    /// <summary>Distinct sites that showed this person; 2+ = verified.</summary>
+    public int SourceCount { get; init; }
+    public string? SourceDomains { get; init; }
 }
 
 public sealed record ChannelDto
@@ -26,6 +29,8 @@ public sealed record ChannelDto
     public bool? IsValid { get; init; }
     public string? ValidationNote { get; init; }
     public string? SourceUrl { get; init; }
+    public int SourceCount { get; init; }
+    public string? SourceDomains { get; init; }
 }
 
 public sealed record SocialDto
@@ -42,6 +47,8 @@ public sealed record FactDto
     public string? Quote { get; init; }
     public string ExtractedBy { get; init; } = "";
     public DateTime FoundAt { get; init; }
+    /// <summary>Same value stated by 2+ different sites.</summary>
+    public bool Verified { get; init; }
 }
 
 public sealed record CompanyDetailDto
@@ -60,6 +67,8 @@ public sealed record CompanyDetailDto
     public string? Gstin { get; init; }
     public DateTime? PeopleEnrichedAt { get; init; }
     public DateTime? LastEnrichedAt { get; init; }
+    public int? LeadScore { get; init; }
+    public int? FacebookFollowers { get; init; }
     public IReadOnlyList<PersonDto> People { get; init; } = [];
     public IReadOnlyList<ChannelDto> Channels { get; init; } = [];
     public IReadOnlyList<SocialDto> Socials { get; init; } = [];

@@ -12,7 +12,8 @@ public sealed class PeopleRepository(SqlConnectionFactory db)
     {
         await using var c = await db.OpenAsync(ct);
         var rows = await c.QueryAsync<CompanyToResearch>("""
-            SELECT co.Id AS CompanyId, co.Name, ci.AsciiName AS City, ci.Region, co.CountryIso2, co.Website
+            SELECT co.Id AS CompanyId, co.Name, ci.AsciiName AS City, ci.Region, co.CountryIso2, co.Website,
+                   (SELECT TOP (1) so.Url FROM dbo.CompanySocials so WHERE so.CompanyId = co.Id AND so.Platform = 'Facebook') AS FacebookUrl
             FROM dbo.AspectLeads al
             JOIN dbo.Companies co ON co.Id = al.CompanyId
             JOIN dbo.SearchAspects sa ON sa.Id = al.AspectId
@@ -38,7 +39,8 @@ public sealed class PeopleRepository(SqlConnectionFactory db)
 
         foreach (var p in research.People)
         {
-            await c.ExecuteAsync("""
+            var normalizedName = Truncate(CompanyText.NormalizeName(StripHonorific(p.FullName)), 200);
+            await c.ExecuteAsync($"""
                 MERGE dbo.CompanyPeople AS t
                 USING (SELECT @companyId AS CompanyId, @normalizedName AS NormalizedName) AS s
                    ON t.CompanyId = s.CompanyId AND t.NormalizedName = s.NormalizedName
@@ -48,15 +50,18 @@ public sealed class PeopleRepository(SqlConnectionFactory db)
                     IsDecisionMaker = CASE WHEN @isDecisionMaker = 1 THEN 1 ELSE t.IsDecisionMaker END,
                     Phone = COALESCE(t.Phone, @phone), Email = COALESCE(t.Email, @email),
                     LinkedInUrl = COALESCE(t.LinkedInUrl, @linkedIn), FacebookUrl = COALESCE(t.FacebookUrl, @facebook),
-                    InstagramUrl = COALESCE(t.InstagramUrl, @instagram)
+                    InstagramUrl = COALESCE(t.InstagramUrl, @instagram),
+                    {SourceTracking.MergeDomainsSet}
                 WHEN NOT MATCHED THEN INSERT
-                    (CompanyId, FullName, NormalizedName, Designation, IsOwner, IsDecisionMaker, Phone, Email, LinkedInUrl, FacebookUrl, InstagramUrl, SourceUrl, Source)
-                    VALUES (@companyId, @fullName, @normalizedName, @designation, @isOwner, @isDecisionMaker, @phone, @email, @linkedIn, @facebook, @instagram, @sourceUrl, @source);
+                    (CompanyId, FullName, NormalizedName, Designation, IsOwner, IsDecisionMaker, Phone, Email, LinkedInUrl, FacebookUrl, InstagramUrl,
+                     SourceUrl, Source, SourceDomains)
+                    VALUES (@companyId, @fullName, @normalizedName, @designation, @isOwner, @isDecisionMaker, @phone, @email, @linkedIn, @facebook, @instagram,
+                     @sourceUrl, @source, @domain);
                 """, new
             {
                 companyId,
                 fullName = Truncate(p.FullName, 200),
-                normalizedName = Truncate(CompanyText.NormalizeName(StripHonorific(p.FullName)), 200),
+                normalizedName,
                 designation = Truncate(p.Designation, 200),
                 isOwner = p.IsOwner,
                 isDecisionMaker = p.IsDecisionMaker,
@@ -67,20 +72,36 @@ public sealed class PeopleRepository(SqlConnectionFactory db)
                 instagram = p.InstagramUrl,
                 sourceUrl = Truncate(p.SourceUrl, 1000),
                 source = p.Source,
+                domain = SourceTracking.DomainOf(p.SourceUrl),
             }, tx);
+
+            foreach (var extra in p.AlsoSeenAt)
+                await c.ExecuteAsync($"UPDATE dbo.CompanyPeople SET {SourceTracking.MergeDomainsSet} WHERE CompanyId = @companyId AND NormalizedName = @normalizedName",
+                    new { companyId, normalizedName, domain = SourceTracking.DomainOf(extra) }, tx);
         }
 
         foreach (var ch in research.Channels)
         {
-            await c.ExecuteAsync("""
-                IF NOT EXISTS (SELECT 1 FROM dbo.CompanyChannels WHERE CompanyId = @companyId AND ChannelType = @type AND NormalizedValue = @normalized)
-                    INSERT INTO dbo.CompanyChannels (CompanyId, ChannelType, Value, NormalizedValue, PhoneKind, IsValid, ValidationNote, SourceUrl)
-                    VALUES (@companyId, @type, @value, @normalized, @kind, @valid, @note, @source);
+            var key = new { companyId, type = ch.Type, normalized = Truncate(ch.NormalizedValue, 320) };
+            await c.ExecuteAsync($"""
+                UPDATE dbo.CompanyChannels SET
+                    PhoneKind = COALESCE(PhoneKind, @kind), IsValid = COALESCE(IsValid, @valid), ValidationNote = COALESCE(ValidationNote, @note),
+                    {SourceTracking.MergeDomainsSet}
+                WHERE CompanyId = @companyId AND ChannelType = @type AND NormalizedValue = @normalized;
+
+                IF @@ROWCOUNT = 0
+                    INSERT INTO dbo.CompanyChannels (CompanyId, ChannelType, Value, NormalizedValue, PhoneKind, IsValid, ValidationNote, SourceUrl, SourceDomains)
+                    VALUES (@companyId, @type, @value, @normalized, @kind, @valid, @note, @source, @domain);
                 """, new
             {
-                companyId, type = ch.Type, value = Truncate(ch.Value, 320), normalized = Truncate(ch.NormalizedValue, 320),
+                key.companyId, key.type, key.normalized, value = Truncate(ch.Value, 320),
                 kind = ch.PhoneKind, valid = ch.IsValid, note = Truncate(ch.Note, 200), source = Truncate(ch.SourceUrl, 1000),
+                domain = SourceTracking.DomainOf(ch.SourceUrl),
             }, tx);
+
+            foreach (var extra in ch.AlsoSeenAt)
+                await c.ExecuteAsync($"UPDATE dbo.CompanyChannels SET {SourceTracking.MergeDomainsSet} WHERE CompanyId = @companyId AND ChannelType = @type AND NormalizedValue = @normalized",
+                    new { key.companyId, key.type, key.normalized, domain = SourceTracking.DomainOf(extra) }, tx);
         }
 
         foreach (var s in research.Socials)
@@ -110,11 +131,12 @@ public sealed class PeopleRepository(SqlConnectionFactory db)
                 TeamSize = COALESCE(@teamSize, TeamSize),
                 Turnover = COALESCE(@turnover, Turnover),
                 Gstin = COALESCE(@gstin, Gstin),
+                FacebookFollowers = COALESCE(@followers, FacebookFollowers),
                 -- Partial research (web search was blocked) leaves PeopleEnrichedAt empty so a later run retries it.
                 PeopleEnrichedAt = CASE WHEN @complete = 1 THEN SYSUTCDATETIME() ELSE PeopleEnrichedAt END,
                 LastEnrichedAt = SYSUTCDATETIME(), UpdatedAt = SYSUTCDATETIME()
-            WHERE Id = @companyId
-            """, new
+            WHERE Id = @companyId;
+            """ + LeadScore.RecomputeSql, new
         {
             companyId,
             complete = !research.SearchSkipped,
@@ -122,6 +144,7 @@ public sealed class PeopleRepository(SqlConnectionFactory db)
             teamSize = Truncate(Fact(FactFields.TeamSize), 100),
             turnover = Truncate(Fact(FactFields.Turnover), 100),
             gstin = gstin is { Length: 15 } ? gstin.ToUpperInvariant() : null,
+            followers = int.TryParse(Fact(FactFields.FacebookFollowers), out var followerCount) ? followerCount : (int?)null,
         }, tx);
 
         await tx.CommitAsync(ct);
@@ -133,7 +156,8 @@ public sealed class PeopleRepository(SqlConnectionFactory db)
         await using var c = await db.OpenAsync();
         var company = await c.QuerySingleOrDefaultAsync<CompanyDetailDto>("""
             SELECT co.Id, co.Name, co.Category, co.Address, co.Website, co.MapsUrl, co.Rating, co.ReviewCount,
-                   co.OwnerName, co.TeamSize, co.Turnover, co.Gstin, co.PeopleEnrichedAt, co.LastEnrichedAt
+                   co.OwnerName, co.TeamSize, co.Turnover, co.Gstin, co.PeopleEnrichedAt, co.LastEnrichedAt,
+                   CAST(co.LeadScore AS INT) AS LeadScore, co.FacebookFollowers
             FROM dbo.Companies co
             WHERE co.Id = @companyId
               AND EXISTS (SELECT 1 FROM dbo.AspectLeads al JOIN dbo.SearchAspects sa ON sa.Id = al.AspectId
@@ -144,13 +168,15 @@ public sealed class PeopleRepository(SqlConnectionFactory db)
             return null;
 
         var people = await c.QueryAsync<PersonDto>("""
-            SELECT Id, FullName, Designation, IsOwner, IsDecisionMaker, Phone, Email, LinkedInUrl, FacebookUrl, InstagramUrl, Source, SourceUrl
+            SELECT Id, FullName, Designation, IsOwner, IsDecisionMaker, Phone, Email, LinkedInUrl, FacebookUrl, InstagramUrl, Source, SourceUrl,
+                   CAST(SourceCount AS INT) AS SourceCount, SourceDomains
             FROM dbo.CompanyPeople WHERE CompanyId = @companyId
             ORDER BY IsOwner DESC, IsDecisionMaker DESC, FullName
             """, new { companyId });
         var channels = await c.QueryAsync<ChannelDto>("""
-            SELECT ChannelType, NormalizedValue, PhoneKind, IsValid, ValidationNote, SourceUrl
-            FROM dbo.CompanyChannels WHERE CompanyId = @companyId ORDER BY ChannelType, Id
+            SELECT ChannelType, NormalizedValue, PhoneKind, IsValid, ValidationNote, SourceUrl,
+                   CAST(SourceCount AS INT) AS SourceCount, SourceDomains
+            FROM dbo.CompanyChannels WHERE CompanyId = @companyId ORDER BY ChannelType, SourceCount DESC, Id
             """, new { companyId });
         var socials = await c.QueryAsync<SocialDto>(
             "SELECT Platform, Url FROM dbo.CompanySocials WHERE CompanyId = @companyId ORDER BY Platform", new { companyId });
@@ -159,7 +185,16 @@ public sealed class PeopleRepository(SqlConnectionFactory db)
             FROM dbo.CompanyFieldValues WHERE CompanyId = @companyId ORDER BY FieldName, FoundAt DESC
             """, new { companyId });
 
-        return company with { People = people.AsList(), Channels = channels.AsList(), Socials = socials.AsList(), Facts = facts.AsList() };
+        // A fact is verified when the same value (case-insensitive) is stated on 2+ different sites.
+        var factList = facts.AsList();
+        var verifiedKeys = factList
+            .GroupBy(f => (f.FieldName, Value: f.Value.Trim().ToLowerInvariant()))
+            .Where(g => g.Select(f => SourceTracking.DomainOf(f.SourceUrl)).Distinct().Count() >= 2)
+            .Select(g => g.Key)
+            .ToHashSet();
+        var markedFacts = factList.Select(f => f with { Verified = verifiedKeys.Contains((f.FieldName, f.Value.Trim().ToLowerInvariant())) }).ToList();
+
+        return company with { People = people.AsList(), Channels = channels.AsList(), Socials = socials.AsList(), Facts = markedFacts };
     }
 
     private static string StripHonorific(string name) =>

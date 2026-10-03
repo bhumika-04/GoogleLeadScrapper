@@ -34,6 +34,11 @@ public sealed record LeadRowDto
     public DateTime? PeopleEnrichedAt { get; init; }
     /// <summary>Set by any research attempt; with PeopleEnrichedAt null it means "partial" (web search was blocked).</summary>
     public DateTime? LastEnrichedAt { get; init; }
+
+    // Stage 5
+    public int? LeadScore { get; init; }
+    /// <summary>Phones/emails/people confirmed by 2+ different sites.</summary>
+    public int VerifiedCount { get; init; }
 }
 
 /// <summary>One person row for the "People" export sheet.</summary>
@@ -53,6 +58,7 @@ public sealed record PersonExportRow
     public string? InstagramUrl { get; init; }
     public string? Source { get; init; }
     public string SourceUrl { get; init; } = "";
+    public int SourceCount { get; init; }
 }
 
 public sealed record PagedResult<T>(IReadOnlyList<T> Items, int Total, int Page, int PageSize);

@@ -99,6 +99,8 @@ export type Lead = {
   gstin: string | null;
   peopleEnrichedAt: string | null;
   lastEnrichedAt: string | null;
+  leadScore: number | null;
+  verifiedCount: number;
 };
 
 export type Person = {
@@ -114,6 +116,8 @@ export type Person = {
   instagramUrl: string | null;
   source: string | null;
   sourceUrl: string;
+  sourceCount: number;
+  sourceDomains: string | null;
 };
 
 export type Channel = {
@@ -123,9 +127,11 @@ export type Channel = {
   isValid: boolean | null;
   validationNote: string | null;
   sourceUrl: string | null;
+  sourceCount: number;
+  sourceDomains: string | null;
 };
 
-export type Fact = { fieldName: string; value: string; sourceUrl: string; quote: string | null; extractedBy: string; foundAt: string };
+export type Fact = { fieldName: string; value: string; sourceUrl: string; quote: string | null; extractedBy: string; foundAt: string; verified: boolean };
 
 export type CompanyDetail = {
   id: number;
@@ -142,6 +148,8 @@ export type CompanyDetail = {
   gstin: string | null;
   peopleEnrichedAt: string | null;
   lastEnrichedAt: string | null;
+  leadScore: number | null;
+  facebookFollowers: number | null;
   people: Person[];
   channels: Channel[];
   socials: { platform: string; url: string }[];

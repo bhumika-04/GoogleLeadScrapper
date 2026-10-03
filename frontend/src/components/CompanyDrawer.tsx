@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { formatUtc } from "@/lib/format";
 import type { CompanyDetail, Person } from "@/lib/types";
+import { ScoreBadge, VerifiedTag } from "@/components/ScoreBadge";
 
 const FACT_LABELS: Record<string, string> = {
   OwnerName: "Owner",
@@ -13,6 +14,7 @@ const FACT_LABELS: Record<string, string> = {
   LegalStatus: "Legal status",
   YearEstablished: "Established",
   NatureOfBusiness: "Nature of business",
+  FacebookFollowers: "Facebook followers",
 };
 
 const host = (url: string) => {
@@ -48,7 +50,10 @@ export function CompanyDrawer({ searchId, companyId, onClose }: { searchId: numb
       <aside className="scroll-thin h-full w-full max-w-xl overflow-y-auto border-l border-line bg-panel shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 z-10 flex items-start gap-3 border-b border-line bg-panel px-5 py-4">
           <div className="min-w-0 flex-1">
-            <h2 className="text-lg font-semibold leading-snug">{company?.name ?? "Loading…"}</h2>
+            <h2 className="flex items-center gap-2 text-lg font-semibold leading-snug">
+              {company && <ScoreBadge score={company.leadScore} />}
+              {company?.name ?? "Loading…"}
+            </h2>
             {company && <p className="text-xs text-muted">{company.category ?? "—"}{company.address && ` · ${company.address}`}</p>}
           </div>
           <button onClick={onClose} className="btn-ghost px-2.5 py-1" aria-label="Close">✕</button>
@@ -89,6 +94,7 @@ export function CompanyDrawer({ searchId, companyId, onClose }: { searchId: numb
                       {c.phoneKind && <span className="rounded bg-panel-2 px-1.5 py-0.5 text-[11px] text-ink-dim">{c.phoneKind}</span>}
                       {c.isValid === true && <span className="text-[11px] text-ok">✓ valid</span>}
                       {c.isValid === false && <span className="text-[11px] text-bad">✕ {c.validationNote ?? "invalid"}</span>}
+                      <VerifiedTag count={c.sourceCount} domains={c.sourceDomains} />
                       {c.sourceUrl && <a href={c.sourceUrl} target="_blank" rel="noreferrer" className="ml-auto text-[11px] text-muted hover:text-accent">{host(c.sourceUrl)}</a>}
                     </li>
                   ))}
@@ -103,7 +109,7 @@ export function CompanyDrawer({ searchId, companyId, onClose }: { searchId: numb
                     <div key={i} className="grid grid-cols-[130px_1fr] gap-3 px-3 py-2 text-sm">
                       <dt className="text-muted">{FACT_LABELS[f.fieldName] ?? f.fieldName}</dt>
                       <dd>
-                        <div className="font-medium">{f.value}</div>
+                        <div className="font-medium">{f.value} {f.verified && <span className="ml-1 text-[11px] font-semibold text-ok">✓ Verified</span>}</div>
                         <a href={f.sourceUrl} target="_blank" rel="noreferrer" className="text-[11px] text-muted hover:text-accent">
                           {host(f.sourceUrl)} · {formatUtc(f.foundAt)}
                         </a>
@@ -127,6 +133,7 @@ function PersonCard({ person: p }: { person: Person }) {
         <span className="font-semibold">{p.fullName}</span>
         {p.isOwner && <span className="rounded-full bg-violet/20 px-2 py-0.5 text-[11px] font-semibold text-violet">Owner</span>}
         {!p.isOwner && p.isDecisionMaker && <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[11px] font-semibold text-accent">Decision maker</span>}
+        <VerifiedTag count={p.sourceCount} domains={p.sourceDomains} />
       </div>
       {p.designation && <div className="text-sm text-ink-dim">{p.designation}</div>}
       <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs">
