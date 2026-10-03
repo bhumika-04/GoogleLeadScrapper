@@ -58,7 +58,7 @@ CREATE TABLE dbo.OpenAiUsage
     TenantId       INT                  NULL CONSTRAINT FK_OpenAiUsage_Tenants REFERENCES dbo.Tenants(Id),
     AspectId       BIGINT               NULL,
     CompanyId      BIGINT               NULL,
-    Purpose        VARCHAR(30)          NOT NULL,         -- 'Translate', 'Stage2Extract', 'PageExtract'
+    Purpose        VARCHAR(30)          NOT NULL,         -- 'Translate', 'Stage2Extract', 'PageExtract', 'IcpScore', 'SuggestKeywords'
     Model          VARCHAR(50)          NOT NULL,
     InputTokens    INT                  NOT NULL,
     OutputTokens   INT                  NOT NULL,

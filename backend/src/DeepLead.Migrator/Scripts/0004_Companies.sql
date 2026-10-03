@@ -55,6 +55,18 @@ CREATE TABLE dbo.AspectLeads
 
 CREATE INDEX IX_AspectLeads_CompanyId ON dbo.AspectLeads(CompanyId);
 
+-- ICP score per session: the same company can be relevant for one session's ICP and not another's
+CREATE TABLE dbo.SearchLeadScores
+(
+    SearchId      BIGINT        NOT NULL CONSTRAINT FK_SearchLeadScores_Searches REFERENCES dbo.Searches(Id),
+    CompanyId     BIGINT        NOT NULL CONSTRAINT FK_SearchLeadScores_Companies REFERENCES dbo.Companies(Id),
+    IcpScore      TINYINT       NOT NULL CONSTRAINT CK_SearchLeadScores_IcpScore CHECK (IcpScore BETWEEN 0 AND 100),
+    IsRelevant    BIT           NOT NULL,
+    Reason        NVARCHAR(1000) NULL,
+    ScoredAt      DATETIME2(0)  NOT NULL CONSTRAINT DF_SearchLeadScores_ScoredAt DEFAULT (SYSUTCDATETIME()),
+    CONSTRAINT PK_SearchLeadScores PRIMARY KEY (SearchId, CompanyId)
+);
+
 -- Phones, emails: one row per value, with validation result
 CREATE TABLE dbo.CompanyChannels
 (

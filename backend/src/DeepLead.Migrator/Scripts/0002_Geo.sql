@@ -37,8 +37,10 @@ CREATE TABLE dbo.Cities
     Region        NVARCHAR(200)     NULL,                -- state / emirate / province
     Latitude      DECIMAL(9,6)      NULL,
     Longitude     DECIMAL(9,6)      NULL,
-    Population    INT               NULL
+    Population    INT               NULL,
+    IsUserAdded   BIT               NOT NULL CONSTRAINT DF_Cities_IsUserAdded DEFAULT (0)   -- typed in the City box, not in GeoNames
 );
 
 CREATE UNIQUE INDEX UX_Cities_GeoNameId ON dbo.Cities(GeoNameId) WHERE GeoNameId IS NOT NULL;
 CREATE INDEX IX_Cities_Country_Name ON dbo.Cities(CountryIso2, AsciiName) INCLUDE (Name, Region, Population);
+CREATE INDEX IX_Cities_Country_Population ON dbo.Cities(CountryIso2, Population DESC) INCLUDE (Name, Region);   -- "Top 50/100/200/500" quick-add

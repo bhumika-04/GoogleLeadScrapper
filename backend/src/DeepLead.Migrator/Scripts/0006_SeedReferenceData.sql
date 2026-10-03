@@ -1,4 +1,4 @@
--- Minimal reference data for the POC (India / Indore). Full GeoNames city import comes later.
+-- Reference data. Cities are loaded from GeoNames: DeepLead.Migrator --import-cities IN
 
 INSERT INTO dbo.Languages (Code, Name, NativeName, IsRtl) VALUES
 ('en', N'English',   N'English',   0),
@@ -19,6 +19,3 @@ INSERT INTO dbo.Countries (Iso2, Iso3, Name, PhoneCode, GoogleDomain) VALUES
 INSERT INTO dbo.CountryLanguages (CountryIso2, LanguageCode, Priority) VALUES
 ('IN', 'hi', 1),
 ('AE', 'ar', 1);
-
-INSERT INTO dbo.Cities (GeoNameId, CountryIso2, Name, AsciiName, Region, Latitude, Longitude) VALUES
-(1269743, 'IN', N'Indore', N'Indore', N'Madhya Pradesh', 22.717920, 75.833300);

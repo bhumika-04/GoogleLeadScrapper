@@ -69,6 +69,21 @@ Google Maps, Google Search (open every result), lead's own website, LinkedIn, Fa
 | GST / CIN | IndiaMART, GST search sites, Zauba | Good for India, useful for dedupe |
 If none of these exist for a lead, the field stays empty – never estimated.
 
+## 5a. Search Console (user input screen – from owner's reference screenshots)
+All search input is entered by the user; nothing is hard-coded (Indore + Printing Companies was only the POC test input).
+| Field | Behaviour |
+|---|---|
+| Session name | Optional; groups the run's leads, validation & research. Blank = auto-named (e.g. "Paper Trader +6 — India, 50 cities") |
+| Market | Country dropdown (flag + ISO code) |
+| City | Multi-select chips with search; user can also **type any city + Enter** (saved as user-added city); "N cities selected" counter; clear-all |
+| Quick-add top cities | Top 50 / 100 / 200 / 500 / Clear – **by population from GeoNames (free, exact, no AI cost)** |
+| Keyword / Business Category | Comma-separated list (e.g. Paper Trader, Paper Stockists, Paper Converters …) |
+| ICP for this session | Editable prompt (collapsible) describing owner's business + scoring rules; saved on this session only. OpenAI scores each lead 0–100 + relevant true/false + reason |
+| Also search for | "AI suggest related" – OpenAI suggests related keywords shown as "+ chip"; click to add |
+| Preview | "Will search N combinations sequentially (C cities × K keywords)" with numbered list: city-major order (1. Keyword1 — City1, 2. Keyword2 — City1 …) |
+
+DB mapping: `Searches` (session, IcpPrompt) -> `SearchKeywords` (User/AiSuggested) + `SearchCities` -> `SearchAspects` (Sequence) -> `SearchLeadScores` (ICP score per session per company).
+
 ## 6. Technical Risks (no APIs, no proxies – must be understood)
 | Risk | Reality | Mitigation |
 |---|---|---|
@@ -180,12 +195,13 @@ Tenants, Users, Roles, Countries, Cities, Languages, CountryLanguages, Searches,
 
 ## 11. Remaining Open Questions
 1. Owner approved stack (section 7) but has doubts – collect and resolve them.
-2. SQL Server credentials for instance `INDUS` (owner will send) -> run migrator.
-3. Git remote URL for push.
+2. Git remote URL for push.
+3. ICP scoring cost: one OpenAI call per lead per session (batching several leads per call reduces cost) – OK?
 
 ## 13. Build Progress
 - 2026-10-03: Solution scaffolded (`backend/DeepLead.sln`, 8 projects + 2 test projects, all packages added, builds with 0 warnings). DbUp migrator with scripts 0001–0006 (tenancy, geo, search/aspects/stages, companies + channels/people/socials/products, pages/evidence/logs, seed IN/AE + Indore). Not yet run against a database.
-- Next: Stage 1 – Google Maps scraper (Playwright) for Indore + "Printing Companies".
+- 2026-10-03: Schema updated for Search Console (sessions, keywords, cities, sequential aspects, ICP scores, user-added cities). Database `LeadScrapper` created, scripts 0001–0006 applied (27 tables). GeoNames import added (`DeepLead.Migrator --import-cities IN`): 7,075 Indian cities loaded with population + state.
+- Next: Stage 1 – Google Maps scraper (Playwright), driven by a session's aspects; test with Indore + "Printing Companies".
 
 ## 12. Decisions Log
 - 2026-10-01: Requirements answers received; stack proposal drafted (section 7).
@@ -204,6 +220,8 @@ Tenants, Users, Roles, Countries, Cities, Languages, CountryLanguages, Searches,
 - 2026-10-03: Google Maps: discard "Permanently closed" listings.
 - 2026-10-03: Tech stack (section 7) **confirmed** by owner. Git repo initialised; owner allows pushing to a remote.
 - 2026-10-03: SQL Server Express -> page content kept out of DB.
+- 2026-10-03: Search input fully user-driven via Search Console (section 5a). OpenAI uses extended with **ICP lead scoring (per session)** and **related-keyword suggestions**. Top-N cities come from GeoNames population, not AI.
+- 2026-10-03: Database = `LeadScrapper` on owner's SQL Server (remote). Connection key `ConnectionStrings:DefaultConnection`, stored in .NET user secrets (id `deeplead`) – never committed.
 - 2026-10-03: **Hybrid page handling approved** (replaces "Stage 4 rule-based only" and "store raw HTML"): rules first -> OpenAI JSON extraction only for relevant pages rules couldn't fully read -> JSON in DB -> cleaned text gzip on disk for 30 days, then deleted.
 - 2026-10-03: Exports: Excel + CSV only (no Google Sheets / no Google API).
 - 2026-10-03: "Temporarily closed" Maps listings kept with a status flag.
