@@ -27,4 +27,4 @@ for ($i = 0; $i -lt 60; $i++) {
     try { Invoke-WebRequest http://localhost:3000/login -UseBasicParsing -TimeoutSec 3 | Out-Null; break } catch { Start-Sleep 2 }
 }
 Start-Process "http://localhost:3000"
-Write-Host "DeepLead is running: web http://localhost:3000  ·  API http://localhost:5264" -ForegroundColor Green
+Write-Host "DeepLead is running: web http://localhost:3000  |  API http://localhost:5264" -ForegroundColor Green

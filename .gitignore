@@ -488,3 +488,5 @@ logs/
 .env*
 
 maps-*.json
+artifacts/
+deploy/secrets.json

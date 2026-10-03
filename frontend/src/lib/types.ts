@@ -35,6 +35,10 @@ export type SearchSummary = {
   aspectsCompleted: number;
   leadCount: number;
   createdAt: string;
+  parentSearchId: number | null;
+  runNumber: number;
+  repeatFrequency: "Weekly" | "Monthly" | null;
+  nextRunAt: string | null;
 };
 
 export type Aspect = {
@@ -101,6 +105,7 @@ export type Lead = {
   lastEnrichedAt: string | null;
   leadScore: number | null;
   verifiedCount: number;
+  isNew: boolean;
 };
 
 export type Person = {
@@ -177,6 +182,10 @@ export type Tenant = {
   sessionCount: number;
   leadCount: number;
   createdAt: string;
+  parentSearchId: number | null;
+  runNumber: number;
+  repeatFrequency: "Weekly" | "Monthly" | null;
+  nextRunAt: string | null;
 };
 
 export type Platform = "LinkedIn" | "Facebook" | "Instagram" | "IndiaMart" | "Justdial";

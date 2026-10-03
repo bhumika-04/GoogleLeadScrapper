@@ -7,7 +7,17 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
 
-var builder = WebApplication.CreateBuilder(args);
+// Services start in System32; relative paths (logs/) must resolve next to the exe.
+if (Microsoft.Extensions.Hosting.WindowsServices.WindowsServiceHelpers.IsWindowsService())
+    Directory.SetCurrentDirectory(AppContext.BaseDirectory);
+
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    // As a Windows service the working directory is System32; read appsettings and write logs next to the exe.
+    ContentRootPath = Microsoft.Extensions.Hosting.WindowsServices.WindowsServiceHelpers.IsWindowsService() ? AppContext.BaseDirectory : default,
+});
+builder.Host.UseWindowsService(o => o.ServiceName = "DeepLead API");
 
 builder.Host.UseSerilog((ctx, lc) => lc
     .ReadFrom.Configuration(ctx.Configuration)

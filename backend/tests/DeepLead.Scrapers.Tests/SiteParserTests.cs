@@ -13,6 +13,21 @@ public class SiteParserTests
         Assert.Equal(["ussinghphotocopy@gmail.com"], data.Emails);
     }
 
+    [Theory]
+    [InlineData("info@yoursite.com")]
+    [InlineData("yourname@gmail.com")]
+    [InlineData("contact@example.com")]
+    public void FindEmails_SkipsTemplatePlaceholders(string email) => Assert.Empty(WebsiteExtractor.FindEmails($"Mail us: {email}"));
+
+    [Theory]
+    [InlineData("https://www.facebook.com/WCPrints/", "https://facebook.com/wcprints")]
+    [InlineData("https://m.facebook.com/wcprints?ref=page", "https://facebook.com/wcprints")]
+    [InlineData("https://www.facebook.com/profile.php?id=1000123&sk=about", "https://facebook.com/profile.php?id=1000123")]
+    [InlineData("https://in.linkedin.com/company/shrinathpapers/", "https://linkedin.com/company/shrinathpapers")]
+    [InlineData("instagram.com/jai_ma_graphics?igsh=xyz", "https://instagram.com/jai_ma_graphics")]
+    public void NormalizeSocialUrl_OneFormPerProfile(string url, string expected) =>
+        Assert.Equal(expected, DeepLead.Core.Text.WebsiteClassifier.NormalizeSocialUrl(url));
+
     [Fact]
     public void WebsiteExtractor_ReadsMailtoTelAndSocialLinks()
     {

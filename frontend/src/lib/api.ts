@@ -16,7 +16,8 @@ import type {
   User,
 } from "./types";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5264";
+// Same-origin by default: Next.js rewrites /api/* to DeepLead.Api (see next.config.ts). Override only for special setups.
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
 const TOKEN_KEY = "deeplead.token";
 export const UNAUTHORIZED_EVENT = "deeplead:unauthorized";
 
@@ -60,7 +61,7 @@ async function request(path: string, init: RequestInit = {}): Promise<Response> 
   try {
     res = await fetch(`${API_URL}${path}`, { ...init, headers });
   } catch {
-    throw new ApiError(0, `Cannot reach the API at ${API_URL}. Is DeepLead.Api running?`);
+    throw new ApiError(0, "Cannot reach the DeepLead API. Is DeepLead.Api running?");
   }
 
   if (res.status === 401 && path !== "/api/auth/login") {
@@ -123,6 +124,9 @@ export const api = {
   pause: (id: number) => json<void>(`/api/searches/${id}/pause`, { method: "POST" }),
   resume: (id: number) => json<void>(`/api/searches/${id}/resume`, { method: "POST" }),
   cancel: (id: number) => json<void>(`/api/searches/${id}/cancel`, { method: "POST" }),
+  rerun: (id: number) => json<SearchDetail>(`/api/searches/${id}/rerun`, { method: "POST" }),
+  setRepeat: (id: number, frequency: "Weekly" | "Monthly" | null) =>
+    json<void>(`/api/searches/${id}/repeat`, { method: "PUT", body: JSON.stringify({ frequency }) }),
 
   company: (searchId: number, companyId: number) => json<CompanyDetail>(`/api/searches/${searchId}/companies/${companyId}`),
 
@@ -132,11 +136,12 @@ export const api = {
   saveAccount: (platform: Platform) => json<void>(`/api/settings/accounts/${platform}/save`, { method: "POST" }),
   disconnectAccount: (platform: Platform) => json<void>(`/api/settings/accounts/${platform}/disconnect`, { method: "POST" }),
 
-  leads: (id: number, opts: { aspectId?: number | null; q?: string; page: number; pageSize: number; sort?: string }) => {
+  leads: (id: number, opts: { aspectId?: number | null; q?: string; page: number; pageSize: number; sort?: string; onlyNew?: boolean }) => {
     const p = new URLSearchParams({ page: String(opts.page), pageSize: String(opts.pageSize) });
     if (opts.aspectId) p.set("aspectId", String(opts.aspectId));
     if (opts.q) p.set("q", opts.q);
     if (opts.sort) p.set("sort", opts.sort);
+    if (opts.onlyNew) p.set("onlyNew", "true");
     return json<Paged<Lead>>(`/api/searches/${id}/leads?${p}`);
   },
 

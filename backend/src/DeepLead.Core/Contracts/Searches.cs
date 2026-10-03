@@ -31,7 +31,13 @@ public sealed record SearchSummaryDto(
     int AspectCount,
     int AspectsCompleted,
     int LeadCount,
-    DateTime CreatedAt);
+    DateTime CreatedAt,
+    long? ParentSearchId,
+    int RunNumber,
+    string? RepeatFrequency,
+    DateTime? NextRunAt);
+
+public sealed record SetRepeatRequest(string? Frequency);
 
 public sealed record AspectDto(
     long Id,

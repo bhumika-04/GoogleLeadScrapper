@@ -26,6 +26,40 @@ public class CompanyMatcherTests
         Assert.True(new CompanyMatcher("Allied Paper and Print Solution Pvt. Ltd.", "Indore").NameMatches("ALLIED PAPER AND PRINT SOLUTION"));
 }
 
+public class SocialPickTests
+{
+    [Fact]
+    public void KeepsProfilesMatchingTheCompany()
+    {
+        var tokens = PeopleDiscovery.NameTokens("WC Prints", "https://wcprints.in/");
+        var picked = PeopleDiscovery.PickCompanyProfiles(
+            [new("Instagram", "https://instagram.com/smifslimited"), new("Instagram", "https://instagram.com/wc_prints")], tokens).ToList();
+        Assert.Equal("https://instagram.com/wc_prints", Assert.Single(picked).Url);
+    }
+
+    [Fact]
+    public void KeepsFirstWhenNothingMatches()
+    {
+        var picked = PeopleDiscovery.PickCompanyProfiles(
+            [new("Facebook", "https://facebook.com/a"), new("Facebook", "https://facebook.com/b")], ["zzzz"]).ToList();
+        Assert.Equal("https://facebook.com/a", Assert.Single(picked).Url);
+    }
+
+    [Theory]
+    [InlineData("https://instagram.com/reel/ddellg2al1u", false)]
+    [InlineData("https://instagram.com/bahetiprintworld", true)]
+    [InlineData("https://facebook.com/profile.php", false)]
+    [InlineData("https://facebook.com/61561314508583", true)]
+    [InlineData("https://youtube.com/watch", false)]
+    [InlineData("https://youtube.com/@indiamart", true)]
+    public void ProfileUrls(string url, bool profile) => Assert.Equal(profile, DeepLead.Core.Text.WebsiteClassifier.IsProfileUrl(url));
+
+    [Fact]
+    public void FacebookPageIdForms_Collapse() =>
+        Assert.Equal("https://facebook.com/61561314508583",
+            DeepLead.Core.Text.WebsiteClassifier.NormalizeSocialUrl("https://www.facebook.com/p/Mahakal-Flex-Printing-Bhamori-61561314508583/"));
+}
+
 public class PhoneTests
 {
     [Theory]
@@ -38,6 +72,18 @@ public class PhoneTests
         Assert.Equal(e164, p.E164);
         Assert.Equal(kind, p.Kind);
     }
+
+    [Theory]
+    [InlineData("+9118001234567", true)]    // "1800 123 4567" template number
+    [InlineData("+919999999999", true)]
+    [InlineData("+919876543210", true)]
+    [InlineData("+919630959679", false)]
+    [InlineData("+917314047882", false)]
+    public void Placeholder_Numbers(string e164, bool placeholder) => Assert.Equal(placeholder, PhoneNormalizer.IsPlaceholder(e164));
+
+    [Fact]
+    public void Extractor_SkipsTemplateNumbers() =>
+        Assert.DoesNotContain(PhoneExtractor.Find("Call 1800 123 4567 or 99999 99999", "IN"), p => true);
 
     [Fact]
     public void Extractor_FindsNumbersInText()

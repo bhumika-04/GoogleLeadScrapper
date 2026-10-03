@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { formatUtc } from "@/lib/format";
 import type { Aspect, Lead, Paged, SearchDetail } from "@/lib/types";
@@ -16,6 +16,7 @@ const LIVE_STATUSES = new Set(["Pending", "Running"]);
 export default function SessionPage() {
   const { id: idParam } = useParams<{ id: string }>();
   const id = Number(idParam);
+  const router = useRouter();
 
   const [detail, setDetail] = useState<SearchDetail | null>(null);
   const [leads, setLeads] = useState<Paged<Lead> | null>(null);
@@ -24,14 +25,15 @@ export default function SessionPage() {
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState("");
+  const [onlyNew, setOnlyNew] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [openCompany, setOpenCompany] = useState<number | null>(null);
 
   const loadDetail = useCallback(() => api.search(id).then(setDetail).catch((e) => setError(e.message)), [id]);
   const loadLeads = useCallback(
-    () => api.leads(id, { aspectId, q: debouncedQuery, page, pageSize: PAGE_SIZE, sort }).then(setLeads).catch((e) => setError(e.message)),
-    [id, aspectId, debouncedQuery, page, sort],
+    () => api.leads(id, { aspectId, q: debouncedQuery, page, pageSize: PAGE_SIZE, sort, onlyNew }).then(setLeads).catch((e) => setError(e.message)),
+    [id, aspectId, debouncedQuery, page, sort, onlyNew],
   );
 
   useEffect(() => { loadDetail(); }, [loadDetail]);
@@ -58,6 +60,30 @@ export default function SessionPage() {
       await loadDetail();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Action failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function runAgain() {
+    if (!confirm("Run this session again now? A new run is created with the same cities and keywords; leads it finds that this run didn't are marked New.")) return;
+    setBusy("rerun");
+    try {
+      const created = await api.rerun(id);
+      router.push(`/searches/${created.summary.id}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not start a new run");
+      setBusy(null);
+    }
+  }
+
+  async function changeRepeat(value: string) {
+    setBusy("repeat");
+    try {
+      await api.setRepeat(id, value === "Weekly" || value === "Monthly" ? value : null);
+      await loadDetail();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not change repeat");
     } finally {
       setBusy(null);
     }
@@ -93,9 +119,22 @@ export default function SessionPage() {
           </div>
           <p className="mt-1 text-sm text-muted">
             {s.countryName} · {s.cityCount} cit{s.cityCount === 1 ? "y" : "ies"} × {s.keywordCount} keyword{s.keywordCount === 1 ? "" : "s"} · created {formatUtc(s.createdAt)}
+            {s.parentSearchId && <> · run {s.runNumber} (<Link href={`/searches/${s.parentSearchId}`} className="text-accent hover:underline">previous run</Link>)</>}
           </p>
+          {s.repeatFrequency && s.nextRunAt && (
+            <p className="mt-1 text-xs text-violet">↻ Repeats {s.repeatFrequency.toLowerCase()} · next run {formatUtc(s.nextRunAt)}</p>
+          )}
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <select className="field w-40 py-2 text-sm" aria-label="Repeat" disabled={!!busy}
+            value={s.repeatFrequency ?? ""} onChange={(e) => changeRepeat(e.target.value)}>
+            <option value="">Repeat: off</option>
+            <option value="Weekly">Repeat weekly</option>
+            <option value="Monthly">Repeat monthly</option>
+          </select>
+          {!LIVE_STATUSES.has(s.status) && (
+            <button className="btn-ghost" disabled={!!busy} onClick={runAgain}>{busy === "rerun" ? "Starting…" : "Run again"}</button>
+          )}
           {(s.status === "Pending" || s.status === "Running") && (
             <button className="btn-ghost" disabled={!!busy} onClick={() => act("pause")}>Pause</button>
           )}
@@ -141,7 +180,13 @@ export default function SessionPage() {
               {selectedAspect ? `${selectedAspect.keyword} — ${selectedAspect.city}` : "All leads"}
               {leads && <span className="ml-2 font-normal text-muted">{leads.total.toLocaleString()}</span>}
             </h2>
-            <select className="field ml-auto w-44 py-1.5 text-sm" value={sort} onChange={(e) => { setSort(e.target.value); setPage(1); }} aria-label="Sort leads">
+            {s.parentSearchId && (
+              <label className="ml-auto flex cursor-pointer items-center gap-2 text-sm text-ink-dim">
+                <input type="checkbox" checked={onlyNew} onChange={(e) => { setOnlyNew(e.target.checked); setPage(1); }} className="accent-[var(--color-accent)]" />
+                New since previous run
+              </label>
+            )}
+            <select className={`field w-44 py-1.5 text-sm ${s.parentSearchId ? "" : "ml-auto"}`} value={sort} onChange={(e) => { setSort(e.target.value); setPage(1); }} aria-label="Sort leads">
               <option value="">Maps order</option>
               <option value="score">Best leads first</option>
               <option value="reviews">Most reviews first</option>

@@ -37,7 +37,14 @@ public static partial class WebsiteExtractor
 
     private static readonly string[] SocialHosts = ["linkedin.com", "facebook.com", "instagram.com", "youtube.com", "youtu.be", "twitter.com", "x.com"];
     private static readonly string[] ContactKeywords = ["contact", "about", "team", "management", "leadership", "director", "founder", "who-we-are", "our-story", "company-profile", "profile"];
-    private static readonly string[] IgnoredEmailSuffixes = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", "example.com", "sentry.io", "wixpress.com", "domain.com"];
+    // Image file names that look like emails, tracking services, and website-template placeholders ("info@yoursite.com").
+    private static readonly string[] IgnoredEmailSuffixes =
+    [
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", "sentry.io", "wixpress.com", "sentry-next.wixpress.com",
+        "@example.com", "@domain.com", "@yourdomain.com", "@yoursite.com", "@yourwebsite.com", "@yourcompany.com", "@company.com",
+        "@website.com", "@email.com", "@test.com", "@sample.com", "@xyz.com", "@abc.com", "@mysite.com", "@site.com",
+    ];
+    private static readonly string[] PlaceholderLocalParts = ["yourname@", "your.name@", "youremail@", "your-email@", "name@", "username@", "email@email", "user@"];
     // Menu/boilerplate words: a "name" containing any of these is page furniture, not a person.
     private static readonly HashSet<string> NotNames = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -162,7 +169,8 @@ public static partial class WebsiteExtractor
     private static void AddEmail(HashSet<string> emails, string raw)
     {
         var e = raw.Trim().Trim('.', ',', ';').ToLowerInvariant();
-        if (e.Length is < 6 or > 254 || !Email().IsMatch(e) || IgnoredEmailSuffixes.Any(s => e.EndsWith(s, StringComparison.Ordinal)))
+        if (e.Length is < 6 or > 254 || !Email().IsMatch(e) || IgnoredEmailSuffixes.Any(s => e.EndsWith(s, StringComparison.Ordinal))
+            || PlaceholderLocalParts.Any(p => e.StartsWith(p, StringComparison.Ordinal)))
             return;
         emails.Add(e);
     }

@@ -275,7 +275,31 @@ Tenants, Users, Roles, Countries, Cities, Languages, CountryLanguages, Searches,
     UI: Score column, "Best leads first" sort, Verified tags in the drawer; Excel: Lead score + Verified items, People sheet "Confirmed by sites".
   - Bug found live and fixed: website name extraction joined text across lines ("Contact Us" + "H. Badri – Founder" -> "Us H. Badri");
     names can no longer cross a line break, may start with an initial, and any menu word rejects the candidate.
-- Next: owner connects a dedicated LinkedIn account and runs a session (verify extraction); OpenAI key for page extraction + native language.
+- 2026-10-03: **Run again / Repeat** (migration 0010): any finished session can be re-run (new linked session, same cities/keywords/ICP);
+  Repeat weekly/monthly – the worker's RepeatScheduler clones the latest run when due and the schedule moves to the new run.
+  Leads not in the previous run are flagged NEW; "New since previous run" filter. Live-tested: run 2 found 4 new of 6; scheduler created run 3.
+- 2026-10-03: **Production hosting** (see section 14). Web app proxies /api to the API (Next.js rewrites), standalone server build,
+  DeepLead.WebHost service wrapper for node, API/Worker Windows-service aware, deploy/publish.ps1 + install.ps1 + uninstall.ps1.
+  Published build smoke-tested (published API exe + standalone web, /api proxied). install.ps1 not yet run on a real server.
+- 2026-10-03: Data-quality fixes from live data: website-template placeholders ignored (info@yoursite.com, 1800 123 4567, 99999…);
+  social links normalised (www./m., trailing slash, tracking params, Facebook /p/name-ID, Instagram _u/), non-profile links
+  (reels, posts, share links) dropped, and with several profiles per platform only those matching the company name/domain are kept.
+- Next: owner connects a dedicated LinkedIn account and runs a session (verify extraction); OpenAI key for page extraction + native language;
+  first real server install.
+
+## 14. Deployment (Windows Server)
+1. Build machine (repo root): `powershell -ExecutionPolicy Bypass -File .\deploy\publish.ps1` -> `artifacts\` (self-contained, no .NET runtime needed on the server).
+2. Copy `artifacts\` to the server. Install **Node.js 20.9+** there (runs the web app).
+3. On the server: copy `secrets.example.json` to `secrets.json`, fill in connection string, JWT key, **the same EncryptionKey as before**
+   (otherwise saved connected-account sessions can't be decrypted), first-admin seed.
+4. As Administrator: `powershell -ExecutionPolicy Bypass -File .\install.ps1` (re-run the same command to update).
+   - DeepLead API (service, localhost only) and DeepLead Web (service, port 3000, firewall opened).
+   - DeepLead Worker runs as a **logon task in the signed-in user's desktop** by default, because Connect account and LinkedIn need a visible
+     browser. Keep that user signed in (disconnect RDP, don't sign out). `-WorkerMode Service` = headless worker as a service
+     (no account connecting).
+   - Database migrations and Chromium install run automatically.
+5. Open `http://<server>:3000`. Uninstall: `uninstall.ps1 [-RemoveFiles]` (database untouched).
+Settings files with secrets (`appsettings.Production.json`) are ACL-restricted to Administrators, SYSTEM and the installing user.
 
 ## 12. Decisions Log
 - 2026-10-01: Requirements answers received; stack proposal drafted (section 7).

@@ -13,7 +13,7 @@ public static class PhoneExtractor
         foreach (var match in Util.FindNumbers(text, countryIso2.ToUpperInvariant(), PhoneNumberUtil.Leniency.VALID, long.MaxValue))
         {
             var normalized = PhoneNormalizer.Normalize(match.RawString, countryIso2);
-            if (normalized is { IsValid: true })
+            if (normalized is { IsValid: true } && !PhoneNormalizer.IsPlaceholder(normalized.E164))
                 found.TryAdd(normalized.E164, normalized);
             if (found.Count >= max)
                 break;

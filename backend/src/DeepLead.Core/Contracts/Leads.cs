@@ -39,6 +39,8 @@ public sealed record LeadRowDto
     public int? LeadScore { get; init; }
     /// <summary>Phones/emails/people confirmed by 2+ different sites.</summary>
     public int VerifiedCount { get; init; }
+    /// <summary>Not found by the previous run of this session (re-runs / repeats only).</summary>
+    public bool IsNew { get; init; }
 }
 
 /// <summary>One person row for the "People" export sheet.</summary>

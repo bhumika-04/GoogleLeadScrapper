@@ -8,7 +8,19 @@ using DeepLead.Scrapers.Web;
 using DeepLead.Worker;
 using Serilog;
 
+// Deployment helper: `DeepLead.Worker.exe install-browsers` downloads Chromium into PLAYWRIGHT_BROWSERS_PATH (or the user profile).
+if (args.Length > 0 && args[0] == "install-browsers")
+    return Microsoft.Playwright.Program.Main(["install", "chromium"]);
+
+// Services start in System32; relative paths (logs/, data/browser/) must resolve next to the exe.
+if (Microsoft.Extensions.Hosting.WindowsServices.WindowsServiceHelpers.IsWindowsService())
+    Directory.SetCurrentDirectory(AppContext.BaseDirectory);
+
 var builder = Host.CreateApplicationBuilder(args);
+
+// Production installs keep Playwright's browsers in a fixed folder (services don't share the installing user's profile).
+if (builder.Configuration["Playwright:BrowsersPath"] is { Length: > 0 } browsersPath)
+    Environment.SetEnvironmentVariable("PLAYWRIGHT_BROWSERS_PATH", browsersPath);
 
 builder.Services.AddWindowsService(options => options.ServiceName = "DeepLead Worker");
 builder.Services.AddSerilog(lc => lc
@@ -39,6 +51,8 @@ builder.Services.AddSingleton(new SecretBox(encryptionKey));
 
 builder.Services.AddHostedService<SearchRunner>();
 builder.Services.AddHostedService<AccountConnector>();
+builder.Services.AddHostedService<RepeatScheduler>();
 
 var host = builder.Build();
 host.Run();
+return 0;

@@ -308,7 +308,7 @@ public sealed class SearchRunner(
             if (WebsiteClassifier.GetSocialPlatform(clean) is { } platform)
             {
                 socialPlatform = platform.ToString();
-                socialUrl = clean;
+                socialUrl = WebsiteClassifier.NormalizeSocialUrl(clean);
             }
             else
             {

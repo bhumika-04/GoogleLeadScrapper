@@ -112,6 +112,9 @@ public sealed class LeadRepository(SqlConnectionFactory db)
         WHERE s.TenantId = @tenantId AND s.Id = @searchId
           AND (@aspectId IS NULL OR al.AspectId = @aspectId)
           AND (@q IS NULL OR co.Name LIKE @q OR co.Category LIKE @q OR co.Address LIKE @q OR co.Website LIKE @q)
+          AND (@onlyNew = 0 OR (s.ParentSearchId IS NOT NULL AND NOT EXISTS (
+                SELECT 1 FROM dbo.AspectLeads al2 JOIN dbo.SearchAspects sa2 ON sa2.Id = al2.AspectId
+                WHERE sa2.SearchId = s.ParentSearchId AND al2.CompanyId = co.Id)))
         """;
 
     private const string LeadSelect = """
@@ -128,6 +131,9 @@ public sealed class LeadRepository(SqlConnectionFactory db)
                 FROM dbo.CompanyPeople p WHERE p.CompanyId = co.Id) AS People,
                (SELECT COUNT(*) FROM dbo.CompanyPeople p WHERE p.CompanyId = co.Id) AS PeopleCount,
                CAST(co.LeadScore AS INT) AS LeadScore,
+               CAST(CASE WHEN s.ParentSearchId IS NOT NULL AND NOT EXISTS (
+                        SELECT 1 FROM dbo.AspectLeads al2 JOIN dbo.SearchAspects sa2 ON sa2.Id = al2.AspectId
+                        WHERE sa2.SearchId = s.ParentSearchId AND al2.CompanyId = co.Id) THEN 1 ELSE 0 END AS BIT) AS IsNew,
                (SELECT COUNT(*) FROM dbo.CompanyChannels ch WHERE ch.CompanyId = co.Id AND ch.SourceCount >= 2)
              + (SELECT COUNT(*) FROM dbo.CompanyPeople p WHERE p.CompanyId = co.Id AND p.SourceCount >= 2) AS VerifiedCount
         """;
@@ -152,11 +158,11 @@ public sealed class LeadRepository(SqlConnectionFactory db)
         return rows.AsList();
     }
 
-    public async Task<PagedResult<LeadRowDto>> GetLeadsAsync(int tenantId, long searchId, long? aspectId, string? search, int page, int pageSize, string? sort = null)
+    public async Task<PagedResult<LeadRowDto>> GetLeadsAsync(int tenantId, long searchId, long? aspectId, string? search, int page, int pageSize, string? sort = null, bool onlyNew = false)
     {
         var q = string.IsNullOrWhiteSpace(search) ? null : "%" + search.Trim() + "%";
         await using var c = await db.OpenAsync();
-        var p = new { tenantId, searchId, aspectId, q, offset = (page - 1) * pageSize, pageSize };
+        var p = new { tenantId, searchId, aspectId, q, onlyNew, offset = (page - 1) * pageSize, pageSize };
 
         // Whitelisted sort orders only (never interpolate user input into SQL).
         var orderBy = sort switch
@@ -177,7 +183,7 @@ public sealed class LeadRepository(SqlConnectionFactory db)
         await using var c = await db.OpenAsync();
         var rows = await c.QueryAsync<LeadRowDto>(
             LeadSelect + "\n" + LeadFrom +" ORDER BY sa.Sequence, al.MapsRank",
-            new { tenantId, searchId, aspectId, q = (string?)null },
+            new { tenantId, searchId, aspectId, q = (string?)null, onlyNew = false },
             commandTimeout: 300);
         return rows.AsList();
     }

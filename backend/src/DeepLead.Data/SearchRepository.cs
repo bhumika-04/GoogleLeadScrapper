@@ -13,7 +13,8 @@ public sealed class SearchRepository(SqlConnectionFactory db)
                (SELECT COUNT(*) FROM dbo.SearchKeywords sk WHERE sk.SearchId = s.Id) AS KeywordCount,
                a.AspectCount, a.AspectsCompleted,
                (SELECT COUNT(DISTINCT al.CompanyId) FROM dbo.AspectLeads al JOIN dbo.SearchAspects sa ON sa.Id = al.AspectId WHERE sa.SearchId = s.Id) AS LeadCount,
-               s.CreatedAt
+               s.CreatedAt,
+               s.ParentSearchId, s.RunNumber, s.RepeatFrequency, s.NextRunAt
         FROM dbo.Searches s
         JOIN dbo.Countries co ON co.Iso2 = s.CountryIso2
         OUTER APPLY (SELECT COUNT(*) AS AspectCount,
@@ -79,6 +80,82 @@ public sealed class SearchRepository(SqlConnectionFactory db)
 
         await tx.CommitAsync();
         return searchId;
+    }
+
+    /// <summary>
+    /// Creates the next run of a session: same market, cities, keywords and ICP, as a new Pending session linked to it.
+    /// A repeat schedule moves to the new run (the latest run of a series carries NextRunAt). Null if the source doesn't exist.
+    /// </summary>
+    public async Task<long?> CloneAsync(long sourceId, int? tenantId = null, int? userId = null)
+    {
+        await using var c = await db.OpenAsync();
+        await using var tx = await c.BeginTransactionAsync();
+
+        var newId = await c.ExecuteScalarAsync<long?>("""
+            DECLARE @new TABLE (Id BIGINT);
+            INSERT INTO dbo.Searches (TenantId, CreatedByUserId, Name, CountryIso2, IcpPrompt, IncludeNativeLanguage,
+                                      ParentSearchId, RunNumber, RepeatFrequency, NextRunAt)
+            OUTPUT INSERTED.Id INTO @new
+            SELECT s.TenantId, COALESCE(@userId, s.CreatedByUserId),
+                   LEFT(CONCAT(CASE WHEN CHARINDEX(N' — run ', s.Name) > 0 THEN LEFT(s.Name, CHARINDEX(N' — run ', s.Name) - 1) ELSE s.Name END,
+                               N' — run ', s.RunNumber + 1), 200),
+                   s.CountryIso2, s.IcpPrompt, s.IncludeNativeLanguage,
+                   s.Id, s.RunNumber + 1, s.RepeatFrequency,
+                   CASE s.RepeatFrequency WHEN 'Weekly' THEN DATEADD(DAY, 7, SYSUTCDATETIME())
+                                          WHEN 'Monthly' THEN DATEADD(MONTH, 1, SYSUTCDATETIME()) END
+            FROM dbo.Searches s
+            WHERE s.Id = @sourceId AND (@tenantId IS NULL OR s.TenantId = @tenantId);
+
+            DECLARE @id BIGINT = (SELECT Id FROM @new);
+            IF @id IS NOT NULL
+            BEGIN
+                -- The schedule moves to the new run; older runs of the series no longer repeat themselves.
+                UPDATE dbo.Searches SET NextRunAt = NULL, RepeatFrequency = NULL WHERE Id = @sourceId;
+
+                INSERT INTO dbo.SearchKeywords (SearchId, Keyword, Source, SortOrder)
+                SELECT @id, Keyword, Source, SortOrder FROM dbo.SearchKeywords WHERE SearchId = @sourceId;
+
+                INSERT INTO dbo.SearchCities (SearchId, CityId, SortOrder)
+                SELECT @id, CityId, SortOrder FROM dbo.SearchCities WHERE SearchId = @sourceId;
+
+                INSERT INTO dbo.SearchAspects (SearchId, Sequence, CityId, KeywordId)
+                SELECT @id, ROW_NUMBER() OVER (ORDER BY sc.SortOrder, sk.SortOrder), sc.CityId, sk.Id
+                FROM dbo.SearchCities sc CROSS JOIN dbo.SearchKeywords sk
+                WHERE sc.SearchId = @id AND sk.SearchId = @id;
+
+                INSERT INTO dbo.AspectStages (AspectId, Stage)
+                SELECT a.Id, st.Stage FROM dbo.SearchAspects a CROSS JOIN (VALUES (CAST(1 AS TINYINT)), (CAST(2 AS TINYINT))) st(Stage)
+                WHERE a.SearchId = @id;
+            END
+            SELECT @id;
+            """, new { sourceId, tenantId, userId }, tx);
+
+        await tx.CommitAsync();
+        return newId;
+    }
+
+    /// <summary>Weekly / Monthly / null (off). The next run is due one period from now.</summary>
+    public async Task<bool> SetRepeatAsync(int tenantId, long id, string? frequency)
+    {
+        await using var c = await db.OpenAsync();
+        return await c.ExecuteAsync("""
+            UPDATE dbo.Searches SET
+                RepeatFrequency = @frequency,
+                NextRunAt = CASE @frequency WHEN 'Weekly' THEN DATEADD(DAY, 7, SYSUTCDATETIME())
+                                            WHEN 'Monthly' THEN DATEADD(MONTH, 1, SYSUTCDATETIME()) END
+            WHERE Id = @id AND TenantId = @tenantId
+            """, new { id, tenantId, frequency }) == 1;
+    }
+
+    /// <summary>Scheduler: repeating sessions whose next run is due (their tenant still active).</summary>
+    public async Task<IReadOnlyList<long>> GetDueRepeatsAsync(CancellationToken ct)
+    {
+        await using var c = await db.OpenAsync(ct);
+        var rows = await c.QueryAsync<long>("""
+            SELECT s.Id FROM dbo.Searches s JOIN dbo.Tenants t ON t.Id = s.TenantId
+            WHERE s.NextRunAt <= SYSUTCDATETIME() AND s.RepeatFrequency IS NOT NULL AND t.IsActive = 1
+            """);
+        return rows.AsList();
     }
 
     public async Task<IReadOnlyList<SearchSummaryDto>> ListAsync(int tenantId)

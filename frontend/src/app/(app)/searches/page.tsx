@@ -66,7 +66,7 @@ export default function SessionsPage() {
               <tr key={s.id} onClick={() => router.push(`/searches/${s.id}`)}
                 className="cursor-pointer border-b border-line/60 transition last:border-0 hover:bg-panel-2">
                 <td className="px-4 py-3">
-                  <div className="font-medium text-ink">{s.name}</div>
+                  <div className="font-medium text-ink">{s.name}{s.repeatFrequency && <span className="ml-2 text-xs text-violet" title={`Repeats ${s.repeatFrequency.toLowerCase()}`}>↻ {s.repeatFrequency}</span>}</div>
                   <div className="text-xs text-muted">{s.keywordCount} keyword{s.keywordCount === 1 ? "" : "s"} · {s.cityCount} cit{s.cityCount === 1 ? "y" : "ies"}</div>
                 </td>
                 <td className="px-4 py-3 text-ink-dim">{s.countryName}</td>

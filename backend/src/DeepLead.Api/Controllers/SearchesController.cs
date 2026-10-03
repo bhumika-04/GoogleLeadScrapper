@@ -57,8 +57,25 @@ public sealed partial class SearchesController(
 
     [HttpGet("{id:long}/leads")]
     public async Task<PagedResult<LeadRowDto>> Leads(long id, [FromQuery] long? aspectId, [FromQuery] string? q,
-        [FromQuery] int page = 1, [FromQuery] int pageSize = 50, [FromQuery] string? sort = null) =>
-        await leads.GetLeadsAsync(User.TenantId(), id, aspectId, q, Math.Max(page, 1), Math.Clamp(pageSize, 10, 500), sort);
+        [FromQuery] int page = 1, [FromQuery] int pageSize = 50, [FromQuery] string? sort = null, [FromQuery] bool onlyNew = false) =>
+        await leads.GetLeadsAsync(User.TenantId(), id, aspectId, q, Math.Max(page, 1), Math.Clamp(pageSize, 10, 500), sort, onlyNew);
+
+    /// <summary>Runs the session again now, as a new linked session (leads not in this run are flagged New).</summary>
+    [HttpPost("{id:long}/rerun")]
+    public async Task<ActionResult<SearchDetailDto>> Rerun(long id)
+    {
+        var newId = await searches.CloneAsync(id, User.TenantId(), User.UserId());
+        return newId is { } n ? CreatedAtAction(nameof(Get), new { id = n }, await searches.GetAsync(User.TenantId(), n)) : NotFound();
+    }
+
+    /// <summary>Repeat: "Weekly", "Monthly" or null to stop.</summary>
+    [HttpPut("{id:long}/repeat")]
+    public async Task<IActionResult> Repeat(long id, SetRepeatRequest request)
+    {
+        if (request.Frequency is not (null or "Weekly" or "Monthly"))
+            return ValidationProblem(new ValidationProblemDetails(new Dictionary<string, string[]> { ["frequency"] = ["Use Weekly, Monthly or null."] }));
+        return await searches.SetRepeatAsync(User.TenantId(), id, request.Frequency) ? NoContent() : NotFound();
+    }
 
     /// <summary>Company card: people (owner first), phones/emails, socials, sourced facts.</summary>
     [HttpGet("{id:long}/companies/{companyId:long}")]

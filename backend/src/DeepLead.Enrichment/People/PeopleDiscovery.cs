@@ -73,7 +73,7 @@ public sealed class PeopleDiscovery(IWebSearch search, PageFetcher fetcher, Indi
         }
 
         await ValidateEmailsAsync(research, ct);
-        Deduplicate(research);
+        Deduplicate(research, NameTokens(company.Name, company.Website));
         logger.LogInformation("People research {Company}: {People} people, {Channels} channels, {Socials} socials, {Facts} facts ({Pages} pages, {Searches} searches)",
             company.Name, research.People.Count, research.Channels.Count, research.Socials.Count, research.Facts.Count, research.PagesVisited, research.SearchesRun);
         return research;
@@ -111,7 +111,7 @@ public sealed class PeopleDiscovery(IWebSearch search, PageFetcher fetcher, Indi
                 research.Channels.Add(new ChannelFinding("Email", email, email, null, null, null, page.FinalUrl));
 
             foreach (var raw in data.TelLinks)
-                if (PhoneNormalizer.Normalize(raw, company.CountryIso2) is { IsValid: true } p)
+                if (PhoneNormalizer.Normalize(raw, company.CountryIso2) is { IsValid: true } p && !PhoneNormalizer.IsPlaceholder(p.E164))
                     research.Channels.Add(new ChannelFinding("Phone", raw, p.E164, p.Kind, true, "tel: link on website", page.FinalUrl));
 
             foreach (var p in PhoneExtractor.Find(data.VisibleText, company.CountryIso2))
@@ -323,7 +323,7 @@ public sealed class PeopleDiscovery(IWebSearch search, PageFetcher fetcher, Indi
     }
 
     /// <summary>Same person from several sources → one entry, keeping the most complete fields.</summary>
-    private static void Deduplicate(CompanyResearch research)
+    private static void Deduplicate(CompanyResearch research, IReadOnlyList<string> nameTokens)
     {
         var merged = research.People
             .GroupBy(p => CompanyText.NormalizeName(StripHonorific(p.FullName)))
@@ -353,9 +353,44 @@ public sealed class PeopleDiscovery(IWebSearch search, PageFetcher fetcher, Indi
         research.Channels.Clear();
         research.Channels.AddRange(channels);
 
-        var socials = research.Socials.DistinctBy(s => s.Url.ToLowerInvariant()).ToList();
+        // Same profile under different spellings (www./m., trailing slash, tracking params) -> one canonical URL;
+        // posts/reels/share links are not profiles.
+        var socials = research.Socials
+            .Select(s => s with { Url = WebsiteClassifier.NormalizeSocialUrl(s.Url) })
+            .Where(s => WebsiteClassifier.IsProfileUrl(s.Url))
+            .DistinctBy(s => s.Url)
+            .GroupBy(s => s.Platform)
+            .SelectMany(g => PickCompanyProfiles(g.ToList(), nameTokens))
+            .ToList();
         research.Socials.Clear();
         research.Socials.AddRange(socials);
+    }
+
+    /// <summary>
+    /// Websites often also link clients, partners or the theme author. With several profiles on one platform keep the ones whose
+    /// handle resembles the company name; if none do, keep the first only. A single profile is kept as is.
+    /// </summary>
+    internal static IEnumerable<SocialFinding> PickCompanyProfiles(IReadOnlyList<SocialFinding> platformProfiles, IReadOnlyList<string> nameTokens)
+    {
+        if (platformProfiles.Count <= 1)
+            return platformProfiles;
+
+        var matching = platformProfiles.Where(s =>
+        {
+            var handle = new string(s.Url.ToLowerInvariant().Where(char.IsLetterOrDigit).ToArray());
+            return nameTokens.Any(t => handle.Contains(t, StringComparison.Ordinal));
+        }).ToList();
+        return matching.Count > 0 ? matching : platformProfiles.Take(1);
+    }
+
+    /// <summary>Distinctive words of the company name (4+ letters) plus its website's domain stem, for matching social handles.</summary>
+    internal static IReadOnlyList<string> NameTokens(string companyName, string? website)
+    {
+        var tokens = CompanyText.NormalizeName(companyName.Split('|', '–', '—', ',')[0]).Split(' ')
+            .Where(t => t.Length >= 4).ToList();
+        if (WebsiteClassifier.GetDomain(website)?.Split('.')[0] is { Length: >= 4 } stem)
+            tokens.Add(stem);
+        return tokens;
     }
 
     public static string StripHonorific(string name) =>
