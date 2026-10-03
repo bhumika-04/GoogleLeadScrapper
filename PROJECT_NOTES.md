@@ -199,7 +199,9 @@ Tenants, Users, Roles, Countries, Cities, Languages, CountryLanguages, Searches,
 ## 13. Build Progress
 - 2026-10-03: Solution scaffolded (`backend/DeepLead.sln`, 8 projects + 2 test projects, all packages added, builds with 0 warnings). DbUp migrator with scripts 0001–0006 (tenancy, geo, search/aspects/stages, companies + channels/people/socials/products, pages/evidence/logs, seed IN/AE + Indore). Not yet run against a database.
 - 2026-10-03: Schema updated for Search Console (sessions, keywords, cities, sequential aspects, ICP scores, user-added cities). Database `LeadScrapper` created, scripts 0001–0006 applied (27 tables). GeoNames import added (`DeepLead.Migrator --import-cities IN`): 7,075 Indian cities loaded with population + state.
-- Next: Stage 1 – Google Maps scraper (Playwright), driven by a session's aspects; test with Indore + "Printing Companies".
+- 2026-10-03: **Stage 1 Google Maps scraper working** (`DeepLead.Scrapers/Maps`). Live test Indore + "Printing Companies", 15 places in 75 s: name, phone, website, rating, review count, category, address, lat/long, place id all filled (0 missing). Permanently closed skipped from list card and place page. Blocked/CAPTCHA page -> `ScrapeBlockedException`. Dev CLI: `DeepLead.Cli maps --keyword ... --city ... [--max N] [--headful]`. 15 parser unit tests pass.
+- Observations: Maps phones are local format (`09685251186`) -> normalize to E.164 in validation step; some "websites" are Instagram/Facebook links -> route to CompanySocials, not Website.
+- Next: save Stage 1 results to DB (Companies + AspectLeads, dedupe by PlaceId), run a whole session's aspects sequentially from the Worker, then the ~120-results cap test (full list without --max) and area-splitting.
 
 ## 12. Decisions Log
 - 2026-10-01: Requirements answers received; stack proposal drafted (section 7).
