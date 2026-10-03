@@ -487,3 +487,4 @@ logs/
 **/appsettings.Local.json
 .env*
 
+maps-*.json

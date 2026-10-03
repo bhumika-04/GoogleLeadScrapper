@@ -1,0 +1,72 @@
+@import "tailwindcss";
+
+/* DeepLead dark theme (matches the Search Console reference design). */
+@theme {
+  --color-bg: #0a1020;
+  --color-panel: #0f1729;
+  --color-panel-2: #141e34;
+  --color-field: #18233c;
+  --color-line: #233152;
+  --color-line-strong: #2f4170;
+  --color-ink: #e6ebf5;
+  --color-ink-dim: #a9b4cc;
+  --color-muted: #6f7d9c;
+  --color-accent: #4f7cff;
+  --color-accent-strong: #3a63e0;
+  --color-chip: #172a52;
+  --color-chip-line: #2c4a8a;
+  --color-ok: #34d399;
+  --color-warn: #fbbf24;
+  --color-bad: #f87171;
+  --color-violet: #8b7cf6;
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-ink);
+}
+
+/* Thin scrollbars inside panels */
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-strong) transparent;
+}
+
+@layer components {
+  .field {
+    @apply w-full rounded-lg border border-line bg-field px-3.5 py-2.5 text-[15px] text-ink placeholder:text-muted outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/25;
+  }
+  .label {
+    @apply mb-1.5 block text-sm font-semibold text-ink;
+  }
+  .hint {
+    @apply font-normal text-muted;
+  }
+  .btn-primary,
+  .btn-ghost,
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply bg-accent text-white hover:bg-accent-strong;
+  }
+  .btn-ghost {
+    @apply border border-line bg-panel-2 text-ink-dim hover:border-line-strong hover:text-ink;
+  }
+  .btn-danger {
+    @apply border border-bad/40 bg-bad/10 text-bad hover:bg-bad/20;
+  }
+  .pill {
+    @apply inline-flex items-center rounded-full border border-line bg-panel-2 px-3 py-1 text-sm text-ink-dim transition hover:border-line-strong hover:text-ink;
+  }
+  .card {
+    @apply rounded-xl border border-line bg-panel;
+  }
+}

@@ -201,7 +201,14 @@ Tenants, Users, Roles, Countries, Cities, Languages, CountryLanguages, Searches,
 - 2026-10-03: Schema updated for Search Console (sessions, keywords, cities, sequential aspects, ICP scores, user-added cities). Database `LeadScrapper` created, scripts 0001–0006 applied (27 tables). GeoNames import added (`DeepLead.Migrator --import-cities IN`): 7,075 Indian cities loaded with population + state.
 - 2026-10-03: **Stage 1 Google Maps scraper working** (`DeepLead.Scrapers/Maps`). Live test Indore + "Printing Companies", 15 places in 75 s: name, phone, website, rating, review count, category, address, lat/long, place id all filled (0 missing). Permanently closed skipped from list card and place page. Blocked/CAPTCHA page -> `ScrapeBlockedException`. Dev CLI: `DeepLead.Cli maps --keyword ... --city ... [--max N] [--headful]`. 15 parser unit tests pass.
 - Observations: Maps phones are local format (`09685251186`) -> normalize to E.164 in validation step; some "websites" are Instagram/Facebook links -> route to CompanySocials, not Website.
-- Next: save Stage 1 results to DB (Companies + AspectLeads, dedupe by PlaceId), run a whole session's aspects sequentially from the Worker, then the ~120-results cap test (full list without --max) and area-splitting.
+- 2026-10-03: **Web app working end-to-end** (login → Search Console → Worker runs aspects → live progress → leads table → Excel/CSV).
+  - API (`DeepLead.Api`, http://localhost:5264): JWT login, geo (countries, city type-ahead, top-N), sessions (create/list/detail/pause/resume/cancel), leads (paged, filter), export (Excel: "All leads" + one sheet per aspect; CSV UTF-8 BOM).
+  - Worker (`DeepLead.Worker`): polls DB for Pending sessions, runs aspects in sequence, saves to company cache (dedupe by Maps place id, else normalized name+city), phones -> E.164 via libphonenumber, Instagram/Facebook "websites" -> CompanySocials, Google block -> 20-min cool-down then retry, honours Pause/Cancel between listings, resumes interrupted sessions on restart. `Scraping:MaxResultsPerAspect` = test cap only.
+  - Frontend (`frontend/`, Next.js 16 + Tailwind 4, dark theme from reference screenshots): login, Sessions list, Search Console (market, city chips with type-ahead + typed cities + Top 50/100/200/500, keywords, ICP box, run-plan preview), session page (stats, combinations list, leads table, pause/resume/cancel, export). Polls every 4–5 s instead of SignalR for now.
+  - `run-dev.ps1` starts API + Worker + web in 3 windows.
+  - Deviations from section 7 (deliberate, for now): Hangfire removed – a DB-polling BackgroundService is simpler for sequential runs (Hangfire can return for scheduled/recurring jobs); SignalR replaced by polling.
+  - Known data issue: GeoNames population is wrong for some places (district totals, e.g. Kallakurichi, Nowrangapur, Rasapudipalem appear in Top 50). Cities now shown/searched by ASCII name ("Rajkot", not "Rājkot").
+- Next: full-list test (no cap) to measure the ~120 Maps cap + area splitting; user management screen; then Stage 2 (OpenAI key needed).
 
 ## 12. Decisions Log
 - 2026-10-01: Requirements answers received; stack proposal drafted (section 7).
