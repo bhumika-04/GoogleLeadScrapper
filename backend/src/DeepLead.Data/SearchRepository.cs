@@ -159,7 +159,8 @@ public sealed class SearchRepository(SqlConnectionFactory db)
     {
         await using var c = await db.OpenAsync(ct);
         var rows = await c.QueryAsync<AspectRunInfo>("""
-            SELECT a.Id, a.Sequence, a.CityId, ci.AsciiName AS City, ci.Region, k.Keyword, a.Status, st.Status AS MapsStatus
+            SELECT a.Id, a.Sequence, a.CityId, ci.AsciiName AS City, ci.Region, k.Keyword, a.Status, st.Status AS MapsStatus,
+                   ci.Latitude, ci.Longitude, ci.Population
             FROM dbo.SearchAspects a
             JOIN dbo.Cities ci ON ci.Id = a.CityId
             JOIN dbo.SearchKeywords k ON k.Id = a.KeywordId

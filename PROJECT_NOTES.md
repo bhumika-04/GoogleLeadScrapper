@@ -254,8 +254,16 @@ Tenants, Users, Roles, Countries, Cities, Languages, CountryLanguages, Searches,
   Gemini API grounding with Google Search ($14/1,000 after 5,000 free/month; Google "AI Mode" itself has no API),
   Chrome extension (Manifest V3) using the user's own logged-in browser (good for LinkedIn/Facebook, but needs Chrome open on a PC).
   Revisit if blocking becomes the bottleneck.
-- Next: owner connects a dedicated LinkedIn account and runs a session (verify extraction); Facebook page search; full-list Maps test
-  (~120 cap) + area splitting; user management.
+- 2026-10-03: **User management** – Settings > Users (add with temporary password, role, reset password, deactivate; can't remove own/last
+  admin access), Settings > Customers for platform admins (create isolated workspace + first TenantAdmin, activate/deactivate),
+  Account page (change own password). Deactivation is enforced on the next request (JWT OnTokenValidated DB check). API-tested 14 cases incl. isolation.
+- 2026-10-03: **Full-list Maps test**: Indore "Printing Companies" -> 117 saved in 556 s (~4.8 s/place), list never showed
+  "end of list" => Google's ~120 cap confirmed. **Area splitting built**: if the city list is capped (≥100 cards, no end-of-list),
+  the worker re-searches over a grid of map centres (3×3, or 5×5 for cities ≥3M people, 4 km apart, zoom 15), skips places already
+  saved at list level (no page open), drops results > (span×1.5 + 6 km) from the city centre. Live check: one area 4 km east returned
+  results averaging 1.6 km from its centre, 2 of its top 12 were not in the 117-result city list. Settings: Scraping:AreaSplitting*.
+  Cost: a full 3×3 split can add 30–90 min per capped combination (mostly list scrolling; known places are skipped).
+- Next: owner connects a dedicated LinkedIn account and runs a session (verify extraction); Facebook page search.
 
 ## 12. Decisions Log
 - 2026-10-01: Requirements answers received; stack proposal drafted (section 7).

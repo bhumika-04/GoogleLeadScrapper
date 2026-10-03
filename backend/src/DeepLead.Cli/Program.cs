@@ -47,7 +47,13 @@ static async Task<int> RunMapsAsync(Dictionary<string, string?> o)
         Region: o.GetValueOrDefault("region"),
         CountryName: o.GetValueOrDefault("country") ?? "India",
         CountryIso2: o.GetValueOrDefault("iso2") ?? "IN",
-        MaxResults: o.TryGetValue("max", out var max) && int.TryParse(max, out var m) ? m : null);
+        MaxResults: o.TryGetValue("max", out var max) && int.TryParse(max, out var m) ? m : null)
+    {
+        // --lat/--lng: area search centred on that point (as the worker does when a city list is capped).
+        Center = decimal.TryParse(o.GetValueOrDefault("lat"), System.Globalization.CultureInfo.InvariantCulture, out var lat)
+                 && decimal.TryParse(o.GetValueOrDefault("lng"), System.Globalization.CultureInfo.InvariantCulture, out var lng)
+            ? (lat, lng) : null,
+    };
 
     await using var session = await BrowserSession.StartAsync(new BrowserOptions { Headless = !o.ContainsKey("headful") });
     var scraper = new GoogleMapsScraper(session, loggerFactory.CreateLogger<GoogleMapsScraper>());
@@ -70,6 +76,8 @@ static async Task<int> RunMapsAsync(Dictionary<string, string?> o)
     await File.WriteAllTextAsync(outPath, json);
 
     Console.WriteLine($"{results.Count} listings in {(DateTime.UtcNow - started).TotalSeconds:N0}s -> {Path.GetFullPath(outPath)}");
+    if (scraper.LastListStats is { } stats)
+        Console.WriteLine($"List: {stats.Cards} cards, {(stats.ReachedEnd ? "reached end of list" : "list capped / stopped growing")}, {stats.PermanentlyClosed} permanently closed");
     return 0;
 }
 

@@ -55,6 +55,28 @@ public class MapsParsingTests
         Assert.Equal("https://jaimagraphics.com/", MapsParsing.CleanWebsite("https://www.google.com/url?q=https://jaimagraphics.com/&opi=1"));
 
     [Fact]
+    public void BuildAreaSearchUrl_CentresMap() =>
+        Assert.Equal("https://www.google.com/maps/search/Printing%20Companies/@22.71792,75.8333,15z?hl=en&gl=in",
+            MapsParsing.BuildAreaSearchUrl("Printing Companies", 22.717920m, 75.833300m, 15, "IN", "en"));
+
+    [Fact]
+    public void AreaGrid_IsCentreFirstAndEvenlySpaced()
+    {
+        var grid = MapsParsing.AreaGrid(22.717920m, 75.833300m, 3, 4);
+        Assert.Equal(9, grid.Count);
+        Assert.Equal((22.717920m, 75.833300m), grid[0]);   // centre first
+        foreach (var p in grid.Skip(1))
+        {
+            var km = MapsParsing.DistanceKm(22.717920m, 75.833300m, p.Latitude, p.Longitude);
+            Assert.InRange(km, 3.9, 5.7);   // 4 km to edge neighbours, ~5.66 km to corners
+        }
+    }
+
+    [Fact]
+    public void DistanceKm_IndoreToBhopal() =>
+        Assert.InRange(MapsParsing.DistanceKm(22.7196m, 75.8577m, 23.2599m, 77.4126m), 165, 180);
+
+    [Fact]
     public void BuildSearchUrl_EncodesQueryAndSetsLocale() =>
         Assert.Equal("https://www.google.com/maps/search/Printing%20Companies%20in%20Indore?hl=en&gl=in",
             MapsParsing.BuildSearchUrl("Printing Companies in Indore", "IN", "en"));

@@ -19,18 +19,26 @@ public sealed class GoogleMapsScraper(BrowserSession session, ILogger<GoogleMaps
 
     private readonly MapsSelectors _s = selectors ?? new MapsSelectors();
 
+    public MapsListStats? LastListStats { get; private set; }
+
     public async IAsyncEnumerable<MapsListing> SearchAsync(MapsSearchRequest request, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        var query = string.IsNullOrWhiteSpace(request.Region)
-            ? $"{request.Keyword} in {request.City}, {request.CountryName}"
-            : $"{request.Keyword} in {request.City}, {request.Region}, {request.CountryName}";
+        LastListStats = null;
+
+        // City search: "keyword in City, Region, Country". Area search: the keyword alone, map centred on one part of the city.
+        var query = request.Center is not null ? request.Keyword
+            : string.IsNullOrWhiteSpace(request.Region)
+                ? $"{request.Keyword} in {request.City}, {request.CountryName}"
+                : $"{request.Keyword} in {request.City}, {request.Region}, {request.CountryName}";
 
         var listPage = await session.Context.NewPageAsync();
         var detailPage = await session.Context.NewPageAsync();
         try
         {
-            var searchUrl = MapsParsing.BuildSearchUrl(query, request.CountryIso2, request.LanguageCode);
-            logger.LogInformation("Maps search: {Query}", query);
+            var searchUrl = request.Center is { } c
+                ? MapsParsing.BuildAreaSearchUrl(query, c.Latitude, c.Longitude, request.Zoom, request.CountryIso2, request.LanguageCode)
+                : MapsParsing.BuildSearchUrl(query, request.CountryIso2, request.LanguageCode);
+            logger.LogInformation("Maps search: {Query}{Area}", query, request.Center is { } at ? $" @ {at.Latitude},{at.Longitude}" : "");
             await listPage.GotoAsync(searchUrl, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
             await HandleInterstitialsAsync(listPage);
 
@@ -47,13 +55,21 @@ public sealed class GoogleMapsScraper(BrowserSession session, ILogger<GoogleMaps
                 {
                     logger.LogInformation("Maps returned no results for {Query}", query);
                 }
+                LastListStats = new MapsListStats(1, ReachedEnd: true, 0, 0);
                 yield break;
             }
 
-            var cards = await CollectResultCardsAsync(listPage, request.MaxResults, cancellationToken);
-            var open = cards.Where(c => !c.PermanentlyClosed).ToList();
-            logger.LogInformation("Maps list for {Query}: {Total} places, {Closed} permanently closed skipped",
-                query, cards.Count, cards.Count - open.Count);
+            var (cards, reachedEnd) = await CollectResultCardsAsync(listPage, request.MaxResults, cancellationToken);
+            var closed = cards.Count(c => c.PermanentlyClosed);
+            var known = request.SkipPlaceIds;
+            var open = cards
+                .Where(c => !c.PermanentlyClosed)
+                .Where(c => known is null || MapsParsing.ParsePlaceId(c.Href) is not { } id || !known.Contains(id))
+                .ToList();
+            var skippedKnown = cards.Count - closed - open.Count;
+            LastListStats = new MapsListStats(cards.Count, reachedEnd, skippedKnown, closed);
+            logger.LogInformation("Maps list for {Query}: {Total} places ({End}), {Closed} permanently closed, {Known} already saved – opening {Open}",
+                query, cards.Count, reachedEnd ? "end of list" : "list capped", closed, skippedKnown, open.Count);
 
             var rank = 0;
             foreach (var card in open)
@@ -91,11 +107,13 @@ public sealed class GoogleMapsScraper(BrowserSession session, ILogger<GoogleMaps
 
     private sealed record ResultCard(string Href, string Name, bool PermanentlyClosed);
 
-    private async Task<List<ResultCard>> CollectResultCardsAsync(IPage page, int? maxResults, CancellationToken ct)
+    /// <summary>Scrolls the list until Google says "end of the list", the list stops growing (≈120 cap), or maxResults.</summary>
+    private async Task<(List<ResultCard> Cards, bool ReachedEnd)> CollectResultCardsAsync(IPage page, int? maxResults, CancellationToken ct)
     {
         var feed = page.Locator(_s.ResultsFeed).First;
         var lastCount = 0;
         var idleScrolls = 0;
+        var reachedEnd = false;
 
         while (true)
         {
@@ -109,7 +127,10 @@ public sealed class GoogleMapsScraper(BrowserSession session, ILogger<GoogleMaps
             if (maxResults is { } max && count >= max)
                 break;
             if (await page.Locator(_s.EndOfList).CountAsync() > 0)
+            {
+                reachedEnd = true;
                 break;
+            }
 
             idleScrolls = count == lastCount ? idleScrolls + 1 : 0;
             if (idleScrolls >= MaxIdleScrolls)
@@ -141,7 +162,7 @@ public sealed class GoogleMapsScraper(BrowserSession session, ILogger<GoogleMaps
             .Select(c => new ResultCard(c.Href!, c.Name ?? string.Empty, c.PermanentlyClosed))
             .ToList();
 
-        return maxResults is { } limit ? cards.Take(limit).ToList() : cards;
+        return (maxResults is { } limit ? cards.Take(limit).ToList() : cards, reachedEnd);
     }
 
     private sealed class CardDto

@@ -59,4 +59,6 @@ public sealed record SearchDetailDto(
 /// <summary>A search the worker has claimed, with everything needed to run its aspects.</summary>
 public sealed record SearchRunInfo(long Id, int TenantId, string CountryIso2, string CountryName);
 
-public sealed record AspectRunInfo(long Id, int Sequence, int CityId, string City, string? Region, string Keyword, string Status, string? MapsStatus);
+public sealed record AspectRunInfo(
+    long Id, int Sequence, int CityId, string City, string? Region, string Keyword, string Status, string? MapsStatus,
+    decimal? Latitude, decimal? Longitude, int? Population);

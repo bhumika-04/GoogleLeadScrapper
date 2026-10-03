@@ -20,6 +20,13 @@ public sealed class ScrapingOptions
     /// <summary>Testing aid only; null = scrape until the end of the Maps list.</summary>
     public int? MaxResultsPerAspect { get; init; }
 
+    /// <summary>When a city search hits Google's ~120 cap, search again over a grid of map centres across the city.</summary>
+    public bool AreaSplittingEnabled { get; init; } = true;
+    /// <summary>Cities at or above this population get the large (5×5) grid, others 3×3.</summary>
+    public int LargeCityPopulation { get; init; } = 3_000_000;
+    public double AreaGridStepKm { get; init; } = 4;
+    public int AreaZoom { get; init; } = 15;
+
     /// <summary>Stage 2 (owner, core team, contacts, socials). Companies researched within this many days are reused.</summary>
     public bool PeopleStageEnabled { get; init; } = true;
     public int PeopleCacheDays { get; init; } = 30;
@@ -166,17 +173,54 @@ public sealed class SearchRunner(
 
             var request = new MapsSearchRequest(aspect.Keyword, aspect.City, aspect.Region, search.CountryName, search.CountryIso2,
                 MaxResults: options.MaxResultsPerAspect);
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var done = 0;
-            await foreach (var listing in scraper.SearchAsync(request, ct))
-            {
-                await leads.UpsertMapsLeadAsync(aspect.Id, Prepare(listing, search.CountryIso2, aspect.CityId), ct);
-                done++;
-                await searches.SetAspectProgressAsync(aspect.Id, null, done, ct);
 
-                if (await IsStoppedAsync(search.Id, ct))
+            // Saves one list's places; false = user paused/cancelled. Area searches may stray outside the city: keep within maxKm.
+            async Task<bool> SaveListAsync(MapsSearchRequest req, double? maxKm)
+            {
+                await foreach (var listing in scraper.SearchAsync(req, ct))
                 {
-                    await searches.SetAspectStateAsync(aspect.Id, SearchStatus.Paused, SearchStatus.Paused, null, ct);
-                    return AspectOutcome.Stopped;
+                    if (listing.PlaceId is { } placeId && !seen.Add(placeId))
+                        continue;
+                    if (maxKm is { } km && aspect.Latitude is { } cLat && aspect.Longitude is { } cLng
+                        && listing.Latitude is { } lat && listing.Longitude is { } lng
+                        && MapsParsing.DistanceKm(cLat, cLng, lat, lng) > km)
+                        continue;
+
+                    await leads.UpsertMapsLeadAsync(aspect.Id, Prepare(listing, search.CountryIso2, aspect.CityId), ct);
+                    done++;
+                    await searches.SetAspectProgressAsync(aspect.Id, null, done, ct);
+
+                    if (await IsStoppedAsync(search.Id, ct))
+                    {
+                        await searches.SetAspectStateAsync(aspect.Id, SearchStatus.Paused, SearchStatus.Paused, null, ct);
+                        return false;
+                    }
+                }
+                return true;
+            }
+
+            if (!await SaveListAsync(request, null))
+                return AspectOutcome.Stopped;
+
+            // Google shows at most ~120 places per list. If the city list was cut off, cover the city area by area.
+            var stats = scraper.LastListStats;
+            if (options.AreaSplittingEnabled && options.MaxResultsPerAspect is null
+                && stats is { ReachedEnd: false, Cards: >= 100 } && aspect.Latitude is { } lat0 && aspect.Longitude is { } lng0)
+            {
+                var size = aspect.Population >= options.LargeCityPopulation ? 5 : 3;
+                var grid = MapsParsing.AreaGrid(lat0, lng0, size, options.AreaGridStepKm);
+                var maxKm = (size - 1) / 2.0 * options.AreaGridStepKm * 1.5 + 6;
+                logger.LogInformation("{Keyword} — {City}: list capped at {Cards}; searching {Count} areas ({Size}×{Size})",
+                    aspect.Keyword, aspect.City, stats.Cards, grid.Count, size, size);
+
+                for (var i = 0; i < grid.Count; i++)
+                {
+                    var areaRequest = request with { Center = grid[i], Zoom = options.AreaZoom, SkipPlaceIds = seen };
+                    if (!await SaveListAsync(areaRequest, maxKm))
+                        return AspectOutcome.Stopped;
+                    logger.LogInformation("Area {Index}/{Count} done: {Total} unique places so far", i + 1, grid.Count, done);
                 }
             }
 

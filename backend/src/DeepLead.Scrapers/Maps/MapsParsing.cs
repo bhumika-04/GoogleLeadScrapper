@@ -87,6 +87,40 @@ public static partial class MapsParsing
     public static string BuildSearchUrl(string query, string countryIso2, string languageCode) =>
         $"https://www.google.com/maps/search/{Uri.EscapeDataString(query)}?hl={languageCode}&gl={countryIso2.ToLowerInvariant()}";
 
+    /// <summary>Search centred on a point: /maps/search/{q}/@lat,lng,{zoom}z – results come from that viewport.</summary>
+    public static string BuildAreaSearchUrl(string query, decimal latitude, decimal longitude, int zoom, string countryIso2, string languageCode) =>
+        string.Create(CultureInfo.InvariantCulture,
+            $"https://www.google.com/maps/search/{Uri.EscapeDataString(query)}/@{latitude:0.######},{longitude:0.######},{zoom}z?hl={languageCode}&gl={countryIso2.ToLowerInvariant()}");
+
+    /// <summary>
+    /// Grid of map centres covering a city: size×size points, stepKm apart, around the city centre.
+    /// Used when a single city search hits Google's ~120-results cap.
+    /// </summary>
+    public static IReadOnlyList<(decimal Latitude, decimal Longitude)> AreaGrid(decimal centerLat, decimal centerLng, int size, double stepKm)
+    {
+        var points = new List<(decimal, decimal)>();
+        var latStep = stepKm / 110.574;                                              // km per degree of latitude
+        var lngStep = stepKm / (111.320 * Math.Cos((double)centerLat * Math.PI / 180)); // shrinks towards the poles
+        var half = (size - 1) / 2.0;
+
+        // Centre first, then outwards, so the densest area is covered early.
+        var cells = Enumerable.Range(0, size).SelectMany(r => Enumerable.Range(0, size).Select(c => (r: r - half, c: c - half)))
+            .OrderBy(p => p.r * p.r + p.c * p.c);
+        foreach (var (r, c) in cells)
+            points.Add((Math.Round(centerLat + (decimal)(r * latStep), 6), Math.Round(centerLng + (decimal)(c * lngStep), 6)));
+        return points;
+    }
+
+    /// <summary>Great-circle distance in km (haversine).</summary>
+    public static double DistanceKm(decimal lat1, decimal lng1, decimal lat2, decimal lng2)
+    {
+        static double Rad(decimal d) => (double)d * Math.PI / 180;
+        var dLat = Rad(lat2 - lat1);
+        var dLng = Rad(lng2 - lng1);
+        var a = Math.Pow(Math.Sin(dLat / 2), 2) + Math.Cos(Rad(lat1)) * Math.Cos(Rad(lat2)) * Math.Pow(Math.Sin(dLng / 2), 2);
+        return 6371 * 2 * Math.Asin(Math.Sqrt(a));
+    }
+
     /// <summary>Forces English labels on a place URL so parsing stays stable.</summary>
     public static string WithLanguage(string placeUrl, string languageCode)
     {
