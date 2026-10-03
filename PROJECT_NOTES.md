@@ -6,6 +6,28 @@
 ## 1. Vision
 A multilingual lead-intelligence tool that, for any country, collects business lead data from many sources and builds a **full company profile** (not just contact details). Results are stored separately per search aspect (country + city + keyword).
 
+## 1a. Main Motive (owner, 2026-10-03)
+Find potential leads AND, for each company:
+- **Owner**: name, phone number, social media handles
+- **Core team members**: name, phone number, social media handles
+Company-level data (Maps details, turnover, team size) is secondary to these people + contacts.
+
+### Social media access – DECIDED 2026-10-03: "Connect account" in Settings, no-login sources first
+(Built: Settings page with LinkedIn / Facebook / Instagram / IndiaMART / Justdial cards; worker opens a visible login window,
+user logs in, session saved AES-GCM encrypted in `ConnectedAccounts`. Not yet USED by scrapers – next step.)
+
+**Search-engine finding (2026-10-03, one IP, no proxies):** Google and Brave CAPTCHA on the first query (even in a visible browser);
+Bing serves deliberately irrelevant results to automated clients; Yahoo returns 500; DuckDuckGo works briefly then rate-limits the IP
+for hours. => general web search cannot be a reliable backbone. Stage 2 therefore treats search as best-effort (circuit breaker,
+"partial" flag) and relies on sources that need no search engine: company website, IndiaMART profile, and (next) logged-in platform search.
+
+Original proposal:
+Playwright is not limited to a guest browser:
+- **Persistent profile**: a dedicated browser profile folder per account (`LaunchPersistentContext(userDataDir)`); log in once by hand in a visible window, cookies are reused on later runs.
+- **"Connect account" flow**: worker opens a visible browser, user logs in (incl. 2FA), session saved encrypted per tenant + platform; re-connect when it expires.
+- Use **dedicated accounts**, never someone's main personal account: LinkedIn/Meta restrict or ban accounts that browse like bots; keep volumes low and human-paced.
+- **No-login sources first**: Google `site:linkedin.com/in` snippets (name + title), public Facebook pages (phone/email in About), YouTube, company websites, IndiaMART/Justdial contact person, MCA director lists. Login-based scraping only for what these can't give.
+
 ## 2. Confirmed Decisions
 | Area | Decision |
 |---|---|
@@ -208,7 +230,17 @@ Tenants, Users, Roles, Countries, Cities, Languages, CountryLanguages, Searches,
   - `run-dev.ps1` starts API + Worker + web in 3 windows.
   - Deviations from section 7 (deliberate, for now): Hangfire removed – a DB-polling BackgroundService is simpler for sequential runs (Hangfire can return for scheduled/recurring jobs); SignalR replaced by polling.
   - Known data issue: GeoNames population is wrong for some places (district totals, e.g. Kallakurichi, Nowrangapur, Rasapudipalem appear in Top 50). Cities now shown/searched by ASCII name ("Rajkot", not "Rājkot").
-- Next: full-list test (no cap) to measure the ~120 Maps cap + area splitting; user management screen; then Stage 2 (OpenAI key needed).
+- 2026-10-03: **Stage 2 people discovery + Connected accounts built** (migration 0007).
+  - Per aspect: Maps -> people discovery for each company (30-day company cache) -> aspect done; resume skips finished Maps stage.
+  - Sources: company website (home + contact/about/team pages: emails w/ MX check, phones via libphonenumber, socials, "Proprietor: Mr X" mentions),
+    IndiaMART seller profile (CEO/owner, employees, legal status, GSTIN, year est., forwarding number), DuckDuckGo search (best-effort) for
+    IndiaMART pages, public LinkedIn profile titles (name + designation, kept only if company name matches), company social pages.
+  - Every person/fact stored with source URL; Excel export has a "People" sheet; UI has owner/team column + company drawer.
+  - Live test Indore: Burhani Offset Printers -> owner H Barodawala (Proprietor), Upto 10 people, GSTIN, est. 1997 (IndiaMART);
+    Singh PhotoCopy -> 6 phones + email from website. DDG blocked throughout -> no LinkedIn people found in this test.
+  - 38 unit tests (parsers, matcher, phones). Bugs found by tests/live runs and fixed: glued page text corrupting emails, '+' lost in tel: links.
+- Next (needs owner decision on search source): use connected LinkedIn/Facebook sessions for owner/team search; IndiaMART search via browser;
+  full-list Maps test (~120 cap) + area splitting; user management.
 
 ## 12. Decisions Log
 - 2026-10-01: Requirements answers received; stack proposal drafted (section 7).

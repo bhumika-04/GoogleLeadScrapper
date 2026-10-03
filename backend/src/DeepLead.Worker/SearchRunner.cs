@@ -3,6 +3,7 @@ using DeepLead.Core.Contracts;
 using DeepLead.Core.Maps;
 using DeepLead.Core.Text;
 using DeepLead.Data;
+using DeepLead.Enrichment.People;
 using DeepLead.Enrichment.Validation;
 using DeepLead.Scrapers.Browser;
 using DeepLead.Scrapers.Maps;
@@ -17,15 +18,22 @@ public sealed class ScrapingOptions
 
     /// <summary>Testing aid only; null = scrape until the end of the Maps list.</summary>
     public int? MaxResultsPerAspect { get; init; }
+
+    /// <summary>Stage 2 (owner, core team, contacts, socials). Companies researched within this many days are reused.</summary>
+    public bool PeopleStageEnabled { get; init; } = true;
+    public int PeopleCacheDays { get; init; } = 30;
 }
 
 /// <summary>
-/// Picks up one session at a time and runs its aspects sequentially (Stage 1: Google Maps).
-/// Pause/Cancel from the UI are honoured between listings; a Google block pauses for a cool-down and retries the aspect.
+/// Picks up one session at a time and runs its aspects sequentially:
+/// Stage 1 Google Maps, then Stage 2 people discovery for that aspect's companies.
+/// Pause/Cancel from the UI are honoured between items; a Google Maps block pauses for a cool-down and retries the aspect.
 /// </summary>
 public sealed class SearchRunner(
     SearchRepository searches,
     LeadRepository leads,
+    PeopleRepository people,
+    PeopleDiscovery discovery,
     ScrapingOptions options,
     ILoggerFactory loggerFactory,
     ILogger<SearchRunner> logger) : BackgroundService
@@ -130,28 +138,87 @@ public sealed class SearchRunner(
             return AspectOutcome.Stopped;
 
         logger.LogInformation("Aspect #{Seq}: {Keyword} — {City}", aspect.Sequence, aspect.Keyword, aspect.City);
-        await searches.SetAspectStateAsync(aspect.Id, SearchStatus.Running, SearchStatus.Running, null, ct);
-        await searches.SetAspectProgressAsync(aspect.Id, null, 0, ct);
 
-        var request = new MapsSearchRequest(aspect.Keyword, aspect.City, aspect.Region, search.CountryName, search.CountryIso2,
-            MaxResults: options.MaxResultsPerAspect);
-        var done = 0;
-        await foreach (var listing in scraper.SearchAsync(request, ct))
+        // Stage 1 – Google Maps (skipped when a previous run already finished it, e.g. paused during Stage 2).
+        if (aspect.MapsStatus != SearchStatus.Completed)
         {
-            await leads.UpsertMapsLeadAsync(aspect.Id, Prepare(listing, search.CountryIso2, aspect.CityId), ct);
-            done++;
-            await searches.SetAspectProgressAsync(aspect.Id, null, done, ct);
+            await searches.SetAspectStateAsync(aspect.Id, SearchStatus.Running, SearchStatus.Running, null, ct);
+            await searches.SetAspectProgressAsync(aspect.Id, null, 0, ct);
 
-            if (await IsStoppedAsync(search.Id, ct))
+            var request = new MapsSearchRequest(aspect.Keyword, aspect.City, aspect.Region, search.CountryName, search.CountryIso2,
+                MaxResults: options.MaxResultsPerAspect);
+            var done = 0;
+            await foreach (var listing in scraper.SearchAsync(request, ct))
             {
-                await searches.SetAspectStateAsync(aspect.Id, SearchStatus.Paused, SearchStatus.Paused, null, ct);
-                return AspectOutcome.Stopped;
+                await leads.UpsertMapsLeadAsync(aspect.Id, Prepare(listing, search.CountryIso2, aspect.CityId), ct);
+                done++;
+                await searches.SetAspectProgressAsync(aspect.Id, null, done, ct);
+
+                if (await IsStoppedAsync(search.Id, ct))
+                {
+                    await searches.SetAspectStateAsync(aspect.Id, SearchStatus.Paused, SearchStatus.Paused, null, ct);
+                    return AspectOutcome.Stopped;
+                }
             }
+
+            await searches.SetAspectProgressAsync(aspect.Id, done, done, ct);
+            await searches.SetAspectStateAsync(aspect.Id, SearchStatus.Running, SearchStatus.Completed, null, ct);
+        }
+        if (!options.PeopleStageEnabled)
+        {
+            await searches.CompleteAspectAsync(aspect.Id, ct);
+            return AspectOutcome.Completed;
         }
 
-        await searches.SetAspectProgressAsync(aspect.Id, done, done, ct);
-        await searches.SetAspectStateAsync(aspect.Id, SearchStatus.Completed, SearchStatus.Completed, null, ct);
+        // Stage 2 – people discovery for this aspect's companies.
+        if (!await RunPeopleStageAsync(search, aspect, ct))
+            return AspectOutcome.Stopped;
+
+        await searches.CompleteAspectAsync(aspect.Id, ct);
         return AspectOutcome.Completed;
+    }
+
+    /// <summary>Returns false when the user paused/cancelled during the stage.</summary>
+    private async Task<bool> RunPeopleStageAsync(SearchRunInfo search, AspectRunInfo aspect, CancellationToken ct)
+    {
+        var companies = await people.GetCompaniesToResearchAsync(aspect.Id, options.PeopleCacheDays, ct);
+        var total = await people.CountAspectCompaniesAsync(aspect.Id, ct);
+        var done = total - companies.Count;   // already researched recently (company cache)
+
+        await searches.SetAspectStateAsync(aspect.Id, SearchStatus.Running, SearchStatus.Running, null, ct, stage: 2);
+        await searches.SetAspectProgressAsync(aspect.Id, total, done, ct, stage: 2);
+
+        var partial = 0;
+        foreach (var company in companies)
+        {
+            if (await IsStoppedAsync(search.Id, ct))
+            {
+                await searches.SetAspectStateAsync(aspect.Id, SearchStatus.Paused, SearchStatus.Paused, null, ct, stage: 2);
+                return false;
+            }
+
+            try
+            {
+                var research = await discovery.ResearchAsync(company, ct);
+                await people.SaveResearchAsync(company.CompanyId, research, ct);
+                if (research.SearchSkipped)
+                    partial++;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // One bad website must not stop the run.
+                logger.LogWarning(ex, "People research failed for {Company}", company.Name);
+            }
+
+            done++;
+            await searches.SetAspectProgressAsync(aspect.Id, total, done, ct, stage: 2);
+        }
+
+        var note = partial > 0
+            ? $"Web search was rate-limited for {partial} compan{(partial == 1 ? "y" : "ies")} (website and IndiaMART still checked); owners/teams may be incomplete."
+            : null;
+        await searches.SetAspectStateAsync(aspect.Id, SearchStatus.Running, SearchStatus.Completed, note, ct, stage: 2);
+        return true;
     }
 
     private async Task<bool> IsStoppedAsync(long searchId, CancellationToken ct)

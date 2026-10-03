@@ -9,6 +9,7 @@ import { Logo } from "@/components/Logo";
 const nav = [
   { href: "/searches/new", label: "New search" },
   { href: "/searches", label: "Sessions" },
+  { href: "/settings", label: "Settings", adminOnly: true },
 ];
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -33,7 +34,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <span className="font-semibold">DeepLead</span>
           </Link>
           <nav className="flex gap-1">
-            {nav.map((item) => {
+            {nav.filter((item) => !item.adminOnly || user.role !== "User").map((item) => {
               const active = item.href === "/searches"
                 ? pathname === "/searches" || (/^\/searches\/\d+/.test(pathname))
                 : pathname.startsWith(item.href);

@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\DeepLead.Scrapers\DeepLead.Scrapers.csproj" />
     <ProjectReference Include="..\DeepLead.Core\DeepLead.Core.csproj" />
+    <ProjectReference Include="..\DeepLead.Enrichment\DeepLead.Enrichment.csproj" />
   </ItemGroup>
 
   <ItemGroup>

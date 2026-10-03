@@ -8,6 +8,7 @@ import { formatUtc } from "@/lib/format";
 import type { Aspect, Lead, Paged, SearchDetail } from "@/lib/types";
 import { ProgressBar, StatusBadge } from "@/components/StatusBadge";
 import { LeadsTable } from "@/components/LeadsTable";
+import { CompanyDrawer } from "@/components/CompanyDrawer";
 
 const PAGE_SIZE = 50;
 const LIVE_STATUSES = new Set(["Pending", "Running"]);
@@ -24,6 +25,7 @@ export default function SessionPage() {
   const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [openCompany, setOpenCompany] = useState<number | null>(null);
 
   const loadDetail = useCallback(() => api.search(id).then(setDetail).catch((e) => setError(e.message)), [id]);
   const loadLeads = useCallback(
@@ -123,7 +125,9 @@ export default function SessionPage() {
         </Stat>
         <Stat label="Unique leads" value={s.leadCount.toLocaleString()} />
         <Stat label="Now running" value={running ? `${running.keyword} — ${running.city}` : s.status === "Pending" ? "Waiting for worker…" : "—"}
-          small={running ? `${running.itemsDone} places saved so far` : undefined} />
+          small={running ? (running.peopleStatus === "Running"
+            ? `Finding owners & teams: ${running.peopleDone} / ${running.peopleTotal ?? "?"} companies`
+            : `Google Maps: ${running.itemsDone} places saved so far`) : undefined} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[340px_minmax(0,1fr)]">
@@ -139,7 +143,7 @@ export default function SessionPage() {
             <input className="field ml-auto w-64 py-1.5 text-sm" placeholder="Filter by name, category, address…"
               value={query} onChange={(e) => setQuery(e.target.value)} />
           </div>
-          <LeadsTable leads={leads?.items ?? null} showAspect={!selectedAspect} />
+          <LeadsTable leads={leads?.items ?? null} showAspect={!selectedAspect} onOpen={(l) => setOpenCompany(l.companyId)} />
           {leads && leads.total > PAGE_SIZE && (
             <div className="flex items-center justify-between border-t border-line px-4 py-2.5 text-sm text-muted">
               <span>{(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, leads.total)} of {leads.total.toLocaleString()}</span>
@@ -151,6 +155,8 @@ export default function SessionPage() {
           )}
         </div>
       </div>
+
+      {openCompany !== null && <CompanyDrawer searchId={id} companyId={openCompany} onClose={() => setOpenCompany(null)} />}
     </div>
   );
 }
@@ -196,6 +202,11 @@ function AspectList({ aspects, selectedId, onSelect, total }: {
               <span className={`h-2 w-2 shrink-0 rounded-full ${dot[a.status] ?? "bg-line-strong"}`} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate">{a.sequence}. {a.keyword} — {a.city}</span>
+                {(a.status === "Running" || a.peopleStatus === "Running") && (
+                  <span className="block text-xs text-muted">
+                    {a.peopleStatus === "Running" ? `People ${a.peopleDone}/${a.peopleTotal ?? "?"}` : `Maps ${a.itemsDone} found`}
+                  </span>
+                )}
                 {a.lastError && <span className="block truncate text-xs text-warn">{a.lastError}</span>}
               </span>
               <span className="tabular-nums text-muted">{a.leadCount}</span>

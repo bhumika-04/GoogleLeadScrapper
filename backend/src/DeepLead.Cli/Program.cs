@@ -23,6 +23,9 @@ switch (args[0])
     case "maps":
         return await RunMapsAsync(ParseOptions(args[1..]));
 
+    case "people":
+        return await RunPeopleAsync(ParseOptions(args[1..]));
+
     default:
         Console.Error.WriteLine($"Unknown command '{args[0]}'.");
         return 1;
@@ -67,6 +70,40 @@ static async Task<int> RunMapsAsync(Dictionary<string, string?> o)
     await File.WriteAllTextAsync(outPath, json);
 
     Console.WriteLine($"{results.Count} listings in {(DateTime.UtcNow - started).TotalSeconds:N0}s -> {Path.GetFullPath(outPath)}");
+    return 0;
+}
+
+// DeepLead.Cli people --name "Burhani Offset Printers" --city Indore [--website https://...] [--iso2 IN]
+static async Task<int> RunPeopleAsync(Dictionary<string, string?> o)
+{
+    if (o.GetValueOrDefault("name") is not { } name || o.GetValueOrDefault("city") is not { } city)
+    {
+        Console.Error.WriteLine("--name and --city are required.");
+        return 1;
+    }
+
+    using var loggerFactory = LoggerFactory.Create(b => b.AddSimpleConsole(c => c.SingleLine = true).SetMinimumLevel(LogLevel.Information));
+    using var search = new DeepLead.Scrapers.Search.DuckDuckGoSearch();
+    using var fetcher = new DeepLead.Scrapers.Web.PageFetcher();
+    var discovery = new DeepLead.Enrichment.People.PeopleDiscovery(search, fetcher, new DeepLead.Enrichment.Validation.EmailValidator(),
+        loggerFactory.CreateLogger<DeepLead.Enrichment.People.PeopleDiscovery>());
+
+    var research = await discovery.ResearchAsync(
+        new DeepLead.Core.People.CompanyToResearch(0, name, city, null, o.GetValueOrDefault("iso2") ?? "IN", o.GetValueOrDefault("website")),
+        CancellationToken.None);
+
+    Console.WriteLine($"\nPEOPLE ({research.People.Count})");
+    foreach (var p in research.People)
+        Console.WriteLine($"  {(p.IsOwner ? "[OWNER] " : p.IsDecisionMaker ? "[DM] " : "")}{p.FullName} — {p.Designation ?? "?"} | {p.LinkedInUrl ?? ""} | via {p.Source}: {p.SourceUrl}");
+    Console.WriteLine($"CHANNELS ({research.Channels.Count})");
+    foreach (var c in research.Channels)
+        Console.WriteLine($"  {c.Type}: {c.NormalizedValue} [{c.PhoneKind}{(c.IsValid is { } v ? (v ? " valid" : " INVALID") : "")}] {c.Note} | {c.SourceUrl}");
+    Console.WriteLine($"SOCIALS ({research.Socials.Count})");
+    foreach (var s in research.Socials)
+        Console.WriteLine($"  {s.Platform}: {s.Url}");
+    Console.WriteLine($"FACTS ({research.Facts.Count})");
+    foreach (var f in research.Facts)
+        Console.WriteLine($"  {f.FieldName} = {f.Value} | {f.SourceUrl}");
     return 0;
 }
 

@@ -73,7 +73,8 @@ public sealed class SearchRepository(SqlConnectionFactory db)
             WHERE sc.SearchId = @searchId AND sk.SearchId = @searchId;
 
             INSERT INTO dbo.AspectStages (AspectId, Stage)
-            SELECT Id, 1 FROM dbo.SearchAspects WHERE SearchId = @searchId;
+            SELECT a.Id, s.Stage FROM dbo.SearchAspects a CROSS JOIN (VALUES (CAST(1 AS TINYINT)), (CAST(2 AS TINYINT))) s(Stage)
+            WHERE a.SearchId = @searchId;
             """, new { searchId }, tx);
 
         await tx.CommitAsync();
@@ -101,11 +102,14 @@ public sealed class SearchRepository(SqlConnectionFactory db)
             "SELECT Keyword FROM dbo.SearchKeywords WHERE SearchId = @id ORDER BY SortOrder", new { id });
         var aspects = await c.QueryAsync<AspectDto>("""
             SELECT a.Id, a.Sequence, ci.AsciiName AS City, ci.Region, k.Keyword, a.Status, a.LeadCount,
-                   st.ItemsTotal, COALESCE(st.ItemsDone, 0) AS ItemsDone, st.StartedAt, st.FinishedAt, st.LastError
+                   st.ItemsTotal, COALESCE(st.ItemsDone, 0) AS ItemsDone, st.StartedAt, COALESCE(st2.FinishedAt, st.FinishedAt) AS FinishedAt,
+                   COALESCE(st2.LastError, st.LastError) AS LastError,
+                   st2.Status AS PeopleStatus, st2.ItemsTotal AS PeopleTotal, COALESCE(st2.ItemsDone, 0) AS PeopleDone
             FROM dbo.SearchAspects a
             JOIN dbo.Cities ci ON ci.Id = a.CityId
             JOIN dbo.SearchKeywords k ON k.Id = a.KeywordId
             LEFT JOIN dbo.AspectStages st ON st.AspectId = a.Id AND st.Stage = 1
+            LEFT JOIN dbo.AspectStages st2 ON st2.AspectId = a.Id AND st2.Stage = 2
             WHERE a.SearchId = @id
             ORDER BY a.Sequence
             """, new { id });
@@ -155,42 +159,54 @@ public sealed class SearchRepository(SqlConnectionFactory db)
     {
         await using var c = await db.OpenAsync(ct);
         var rows = await c.QueryAsync<AspectRunInfo>("""
-            SELECT a.Id, a.Sequence, a.CityId, ci.AsciiName AS City, ci.Region, k.Keyword, a.Status
+            SELECT a.Id, a.Sequence, a.CityId, ci.AsciiName AS City, ci.Region, k.Keyword, a.Status, st.Status AS MapsStatus
             FROM dbo.SearchAspects a
             JOIN dbo.Cities ci ON ci.Id = a.CityId
             JOIN dbo.SearchKeywords k ON k.Id = a.KeywordId
+            LEFT JOIN dbo.AspectStages st ON st.AspectId = a.Id AND st.Stage = 1
             WHERE a.SearchId = @searchId AND a.Status NOT IN ('Completed', 'Cancelled')
             ORDER BY a.Sequence
             """, new { searchId });
         return rows.AsList();
     }
 
-    /// <summary>Sets aspect + its stage-1 row. Started/finished timestamps follow the status.</summary>
-    public async Task SetAspectStateAsync(long aspectId, string aspectStatus, string stageStatus, string? error = null, CancellationToken ct = default)
+    /// <summary>Sets the aspect status and one stage row (created if missing). Started/finished timestamps follow the status.</summary>
+    public async Task SetAspectStateAsync(long aspectId, string aspectStatus, string stageStatus, string? error = null,
+        CancellationToken ct = default, byte stage = 1)
     {
         await using var c = await db.OpenAsync(ct);
         await c.ExecuteAsync("""
             UPDATE dbo.SearchAspects SET Status = @aspectStatus WHERE Id = @aspectId;
+
+            IF NOT EXISTS (SELECT 1 FROM dbo.AspectStages WHERE AspectId = @aspectId AND Stage = @stage)
+                INSERT INTO dbo.AspectStages (AspectId, Stage) VALUES (@aspectId, @stage);
 
             UPDATE dbo.AspectStages
             SET Status = @stageStatus,
                 StartedAt = CASE WHEN @stageStatus = 'Running' AND StartedAt IS NULL THEN SYSUTCDATETIME() ELSE StartedAt END,
                 FinishedAt = CASE WHEN @stageStatus IN ('Completed', 'Failed', 'Cancelled') THEN SYSUTCDATETIME() ELSE NULL END,
                 LastError = @error
-            WHERE AspectId = @aspectId AND Stage = 1;
-            """, new { aspectId, aspectStatus, stageStatus, error });
+            WHERE AspectId = @aspectId AND Stage = @stage;
+            """, new { aspectId, aspectStatus, stageStatus, error, stage });
     }
 
-    public async Task SetAspectProgressAsync(long aspectId, int? itemsTotal, int itemsDone, CancellationToken ct = default)
+    /// <summary>Marks the aspect itself done without touching its stage rows (keeps their notes/errors).</summary>
+    public async Task CompleteAspectAsync(long aspectId, CancellationToken ct = default)
+    {
+        await using var c = await db.OpenAsync(ct);
+        await c.ExecuteAsync("UPDATE dbo.SearchAspects SET Status = 'Completed' WHERE Id = @aspectId", new { aspectId });
+    }
+
+    public async Task SetAspectProgressAsync(long aspectId, int? itemsTotal, int itemsDone, CancellationToken ct = default, byte stage = 1)
     {
         await using var c = await db.OpenAsync(ct);
         await c.ExecuteAsync("""
             UPDATE dbo.AspectStages SET ItemsTotal = COALESCE(@itemsTotal, ItemsTotal), ItemsDone = @itemsDone
-            WHERE AspectId = @aspectId AND Stage = 1;
+            WHERE AspectId = @aspectId AND Stage = @stage;
 
             UPDATE dbo.SearchAspects SET LeadCount = (SELECT COUNT(*) FROM dbo.AspectLeads WHERE AspectId = @aspectId)
             WHERE Id = @aspectId;
-            """, new { aspectId, itemsTotal, itemsDone });
+            """, new { aspectId, itemsTotal, itemsDone, stage });
     }
 
     /// <summary>Only moves Running -> final, so a Pause/Cancel the user clicked meanwhile is not overwritten.</summary>

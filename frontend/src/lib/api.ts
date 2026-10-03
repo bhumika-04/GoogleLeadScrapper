@@ -1,6 +1,9 @@
 import type {
   City,
+  CompanyDetail,
+  ConnectedAccount,
   Country,
+  Platform,
   CreateSearchRequest,
   Lead,
   LoginResponse,
@@ -79,7 +82,9 @@ async function errorMessage(res: Response): Promise<string> {
 
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await request(path, init);
-  return res.status === 204 ? (undefined as T) : ((await res.json()) as T);
+  // 202/204 and other empty bodies carry no JSON.
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 export const api = {
@@ -99,6 +104,14 @@ export const api = {
   pause: (id: number) => json<void>(`/api/searches/${id}/pause`, { method: "POST" }),
   resume: (id: number) => json<void>(`/api/searches/${id}/resume`, { method: "POST" }),
   cancel: (id: number) => json<void>(`/api/searches/${id}/cancel`, { method: "POST" }),
+
+  company: (searchId: number, companyId: number) => json<CompanyDetail>(`/api/searches/${searchId}/companies/${companyId}`),
+
+  accounts: () => json<ConnectedAccount[]>("/api/settings/accounts"),
+  connectAccount: (platform: Platform, accountLabel: string | null) =>
+    json<void>(`/api/settings/accounts/${platform}/connect`, { method: "POST", body: JSON.stringify({ accountLabel }) }),
+  saveAccount: (platform: Platform) => json<void>(`/api/settings/accounts/${platform}/save`, { method: "POST" }),
+  disconnectAccount: (platform: Platform) => json<void>(`/api/settings/accounts/${platform}/disconnect`, { method: "POST" }),
 
   leads: (id: number, opts: { aspectId?: number | null; q?: string; page: number; pageSize: number }) => {
     const p = new URLSearchParams({ page: String(opts.page), pageSize: String(opts.pageSize) });

@@ -15,6 +15,7 @@ namespace DeepLead.Api.Controllers;
 public sealed partial class SearchesController(
     SearchRepository searches,
     LeadRepository leads,
+    PeopleRepository people,
     IValidator<CreateSearchRequest> validator) : ControllerBase
 {
     [HttpGet]
@@ -59,6 +60,11 @@ public sealed partial class SearchesController(
         [FromQuery] int page = 1, [FromQuery] int pageSize = 50) =>
         await leads.GetLeadsAsync(User.TenantId(), id, aspectId, q, Math.Max(page, 1), Math.Clamp(pageSize, 10, 500));
 
+    /// <summary>Company card: people (owner first), phones/emails, socials, sourced facts.</summary>
+    [HttpGet("{id:long}/companies/{companyId:long}")]
+    public async Task<ActionResult<CompanyDetailDto>> Company(long id, long companyId) =>
+        await people.GetCompanyDetailAsync(User.TenantId(), companyId) is { } detail ? detail : NotFound();
+
     [HttpGet("{id:long}/export")]
     public async Task<IActionResult> Export(long id, [FromQuery] string format = "excel", [FromQuery] long? aspectId = null)
     {
@@ -69,10 +75,12 @@ public sealed partial class SearchesController(
         var rows = await leads.GetAllLeadsAsync(User.TenantId(), id, aspectId);
         var fileBase = SafeFileName(detail.Summary.Name);
 
-        return format.Equals("csv", StringComparison.OrdinalIgnoreCase)
-            ? File(LeadExporter.ToCsv(rows), "text/csv", $"{fileBase}.csv")
-            : File(LeadExporter.ToExcel(detail.Summary.Name, rows),
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"{fileBase}.xlsx");
+        if (format.Equals("csv", StringComparison.OrdinalIgnoreCase))
+            return File(LeadExporter.ToCsv(rows), "text/csv", $"{fileBase}.csv");
+
+        var persons = await leads.GetPeopleForExportAsync(User.TenantId(), id, aspectId);
+        return File(LeadExporter.ToExcel(detail.Summary.Name, rows, persons),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"{fileBase}.xlsx");
     }
 
     private async Task<IActionResult> Transition(long id, string to, params string[] allowedFrom) =>

@@ -113,8 +113,33 @@ public sealed class LeadRepository(SqlConnectionFactory db)
                (SELECT STRING_AGG(ch.NormalizedValue, ', ') FROM dbo.CompanyChannels ch WHERE ch.CompanyId = co.Id AND ch.ChannelType = 'Email') AS Emails,
                co.Website,
                (SELECT STRING_AGG(so.Url, ', ') FROM dbo.CompanySocials so WHERE so.CompanyId = co.Id) AS Socials,
-               co.Address, co.Rating, co.ReviewCount, co.BusinessStatus, co.Latitude, co.Longitude, co.MapsUrl, al.FoundAt
+               co.Address, co.Rating, co.ReviewCount, co.BusinessStatus, co.Latitude, co.Longitude, co.MapsUrl, al.FoundAt,
+               co.OwnerName, co.TeamSize, co.Turnover, co.Gstin, co.PeopleEnrichedAt, co.LastEnrichedAt,
+               (SELECT STRING_AGG(p.FullName + COALESCE(' (' + p.Designation + ')', ''), '; ')
+                       WITHIN GROUP (ORDER BY p.IsOwner DESC, p.IsDecisionMaker DESC, p.FullName)
+                FROM dbo.CompanyPeople p WHERE p.CompanyId = co.Id) AS People,
+               (SELECT COUNT(*) FROM dbo.CompanyPeople p WHERE p.CompanyId = co.Id) AS PeopleCount
         """;
+
+    public async Task<IReadOnlyList<PersonExportRow>> GetPeopleForExportAsync(int tenantId, long searchId, long? aspectId)
+    {
+        await using var c = await db.OpenAsync();
+        var rows = await c.QueryAsync<PersonExportRow>("""
+            SELECT k.Keyword, ci.AsciiName AS City, co.Name AS Company,
+                   p.FullName, p.Designation, p.IsOwner, p.IsDecisionMaker, p.Phone, p.Email,
+                   p.LinkedInUrl, p.FacebookUrl, p.InstagramUrl, p.Source, p.SourceUrl
+            FROM dbo.AspectLeads al
+            JOIN dbo.SearchAspects sa ON sa.Id = al.AspectId
+            JOIN dbo.Searches s ON s.Id = sa.SearchId
+            JOIN dbo.SearchKeywords k ON k.Id = sa.KeywordId
+            JOIN dbo.Cities ci ON ci.Id = sa.CityId
+            JOIN dbo.Companies co ON co.Id = al.CompanyId
+            JOIN dbo.CompanyPeople p ON p.CompanyId = co.Id
+            WHERE s.TenantId = @tenantId AND s.Id = @searchId AND (@aspectId IS NULL OR al.AspectId = @aspectId)
+            ORDER BY sa.Sequence, al.MapsRank, p.IsOwner DESC, p.IsDecisionMaker DESC
+            """, new { tenantId, searchId, aspectId }, commandTimeout: 300);
+        return rows.AsList();
+    }
 
     public async Task<PagedResult<LeadRowDto>> GetLeadsAsync(int tenantId, long searchId, long? aspectId, string? search, int page, int pageSize)
     {

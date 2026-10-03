@@ -26,6 +26,8 @@ builder.Services.AddSingleton<UserRepository>();
 builder.Services.AddSingleton<GeoRepository>();
 builder.Services.AddSingleton<SearchRepository>();
 builder.Services.AddSingleton<LeadRepository>();
+builder.Services.AddSingleton<AccountRepository>();
+builder.Services.AddSingleton<PeopleRepository>();
 builder.Services.AddSingleton(jwt);
 builder.Services.AddSingleton<JwtTokenService>();
 builder.Services.AddScoped<IValidator<CreateSearchRequest>, CreateSearchRequestValidator>();

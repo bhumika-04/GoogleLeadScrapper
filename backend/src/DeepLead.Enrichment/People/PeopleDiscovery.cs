@@ -1,0 +1,288 @@
+using DeepLead.Core;
+using DeepLead.Core.People;
+using DeepLead.Core.Text;
+using DeepLead.Enrichment.Validation;
+using DeepLead.Scrapers.Search;
+using DeepLead.Scrapers.Sites;
+using DeepLead.Scrapers.Web;
+using Microsoft.Extensions.Logging;
+
+namespace DeepLead.Enrichment.People;
+
+/// <summary>
+/// Stage 2 (no-login sources): finds the owner and core team of a company plus contact channels and social handles.
+/// Every finding carries the URL it came from; nothing is guessed.
+/// Sources: company website (home + contact/about/team pages), one web search for the company,
+/// IndiaMART seller profile, public LinkedIn profile titles in search results.
+/// </summary>
+public sealed class PeopleDiscovery(IWebSearch search, PageFetcher fetcher, EmailValidator emails, ILogger<PeopleDiscovery> logger)
+{
+    private const int MaxWebsitePages = 5;
+
+    private static readonly string[] OwnerRoles = ["owner", "proprietor", "proprietress", "founder", "ceo", "chief executive", "managing director", "chairman", "chairperson", "managing partner"];
+    private static readonly string[] DecisionRoles = ["director", "partner", "head", "president", "vice president", "vp", "general manager", "gm", "cto", "cfo", "coo", "manager"];
+
+    public async Task<CompanyResearch> ResearchAsync(CompanyToResearch company, CancellationToken ct)
+    {
+        var research = new CompanyResearch();
+        var match = new CompanyMatcher(company.Name, company.City);
+
+        // Many small businesses list their IndiaMART page as "website" on Maps: read it as the IndiaMART profile.
+        if (company.Website is not null && IndiaMartParser.ToProfileUrl(company.Website) is { } ownIndiaMart)
+            await ReadIndiaMartAsync(company, match, ownIndiaMart, research, ct);
+        else if (company.Website is not null)
+            await CrawlWebsiteAsync(company, research, ct);
+
+        try
+        {
+            // One search for the company itself: finds IndiaMART, LinkedIn people/company, Facebook/Instagram pages.
+            var results = await RunSearchAsync($"\"{company.Name}\" {company.City}", company.CountryIso2, research, ct);
+            await UseSearchResultsAsync(company, match, results, research, ct);
+
+            // Second, LinkedIn-focused search only when we still have nobody.
+            if (research.People.Count == 0)
+            {
+                var linkedIn = await RunSearchAsync($"\"{company.Name}\" {company.City} linkedin", company.CountryIso2, research, ct);
+                await UseSearchResultsAsync(company, match, linkedIn, research, ct);
+            }
+        }
+        catch (ScrapeBlockedException ex)
+        {
+            // Keep what the website/IndiaMART gave us; the company is retried in a later run.
+            research.SearchSkipped = true;
+            logger.LogWarning("Web search skipped for {Company}: {Reason}", company.Name, ex.Message);
+        }
+
+        await ValidateEmailsAsync(research, ct);
+        Deduplicate(research);
+        logger.LogInformation("People research {Company}: {People} people, {Channels} channels, {Socials} socials, {Facts} facts ({Pages} pages, {Searches} searches)",
+            company.Name, research.People.Count, research.Channels.Count, research.Socials.Count, research.Facts.Count, research.PagesVisited, research.SearchesRun);
+        return research;
+    }
+
+    private async Task<IReadOnlyList<SearchResult>> RunSearchAsync(string query, string countryIso2, CompanyResearch research, CancellationToken ct)
+    {
+        research.SearchesRun++;
+        return await search.SearchAsync(query, countryIso2, ct);
+    }
+
+    // ---------------- Website ----------------
+
+    private async Task CrawlWebsiteAsync(CompanyToResearch company, CompanyResearch research, CancellationToken ct)
+    {
+        var queue = new Queue<string>([company.Website!]);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        while (queue.Count > 0 && seen.Count < MaxWebsitePages)
+        {
+            var url = queue.Dequeue();
+            if (!seen.Add(url.TrimEnd('/')))
+                continue;
+
+            var page = await fetcher.GetAsync(url, ct);
+            if (page is null)
+                continue;
+            research.PagesVisited++;
+
+            var data = WebsiteExtractor.Extract(page.Html, page.FinalUrl);
+            foreach (var link in data.ContactPageLinks)
+                queue.Enqueue(link);
+
+            foreach (var email in data.Emails)
+                research.Channels.Add(new ChannelFinding("Email", email, email, null, null, null, page.FinalUrl));
+
+            foreach (var raw in data.TelLinks)
+                if (PhoneNormalizer.Normalize(raw, company.CountryIso2) is { IsValid: true } p)
+                    research.Channels.Add(new ChannelFinding("Phone", raw, p.E164, p.Kind, true, "tel: link on website", page.FinalUrl));
+
+            foreach (var p in PhoneExtractor.Find(data.VisibleText, company.CountryIso2))
+                research.Channels.Add(new ChannelFinding("Phone", p.E164, p.E164, p.Kind, true, "Found in website text", page.FinalUrl));
+
+            foreach (var social in data.SocialLinks)
+                if (SocialPlatformOf(social) is { } platform && !social.Contains("/in/", StringComparison.OrdinalIgnoreCase))
+                    research.Socials.Add(new SocialFinding(platform, social));
+
+            foreach (var mention in data.RoleMentions)
+            {
+                research.People.Add(new PersonFinding
+                {
+                    FullName = mention.Name,
+                    Designation = mention.Role,
+                    IsOwner = IsOwnerRole(mention.Role),
+                    IsDecisionMaker = IsDecisionRole(mention.Role),
+                    SourceUrl = page.FinalUrl,
+                    Source = "Website",
+                });
+            }
+        }
+    }
+
+    // ---------------- Search results ----------------
+
+    private async Task UseSearchResultsAsync(CompanyToResearch company, CompanyMatcher match, IReadOnlyList<SearchResult> results, CompanyResearch research, CancellationToken ct)
+    {
+        var indiaMartDone = research.Facts.Any(f => f.ExtractedBy == "IndiaMart");
+
+        foreach (var r in results)
+        {
+            if (LinkedInResultParser.Parse(r.Url, r.Title, r.Snippet) is { } person)
+            {
+                // Only keep people whose title/snippet names this company (avoids namesakes from other firms).
+                if (match.Matches(person.MatchText))
+                {
+                    research.People.Add(new PersonFinding
+                    {
+                        FullName = person.FullName,
+                        Designation = person.Designation,
+                        IsOwner = IsOwnerRole(person.Designation),
+                        IsDecisionMaker = IsDecisionRole(person.Designation),
+                        LinkedInUrl = person.ProfileUrl,
+                        SourceUrl = person.ProfileUrl,
+                        Source = "LinkedInSearch",
+                    });
+                }
+                continue;
+            }
+
+            if (!indiaMartDone && IndiaMartParser.ToProfileUrl(r.Url) is { } profileUrl && match.NameMatches($"{r.Title} {r.Snippet}"))
+            {
+                indiaMartDone = await ReadIndiaMartAsync(company, match, profileUrl, research, ct);
+                continue;
+            }
+
+            if (SocialPlatformOf(r.Url) is { } platform && !LinkedInResultParser.IsProfile(r.Url) && match.Matches(r.Title))
+                research.Socials.Add(new SocialFinding(platform, CleanSocialUrl(r.Url)));
+        }
+    }
+
+    private async Task<bool> ReadIndiaMartAsync(CompanyToResearch company, CompanyMatcher match, string profileUrl, CompanyResearch research, CancellationToken ct)
+    {
+        var page = await fetcher.GetAsync(profileUrl, ct);
+        if (page is null)
+            return false;
+        research.PagesVisited++;
+
+        var profile = IndiaMartParser.Parse(page.Html);
+        // Same company? Name must match, and the city too when IndiaMART states one.
+        if (profile.CompanyName is null || !match.NameMatches(profile.CompanyName)
+            || (profile.City is not null && !profile.City.Contains(company.City, StringComparison.OrdinalIgnoreCase)
+                                         && !company.City.Contains(profile.City, StringComparison.OrdinalIgnoreCase)))
+        {
+            logger.LogDebug("IndiaMART profile {Url} is a different company ({Name}, {City})", profileUrl, profile.CompanyName, profile.City);
+            return false;
+        }
+
+        void Fact(string field, string? value, string label)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+                research.Facts.Add(new FactFinding(field, value, profileUrl, $"{label}: {value}", "IndiaMart"));
+        }
+
+        Fact(FactFields.TeamSize, profile.Employees, "Total Number of Employees");
+        Fact(FactFields.Turnover, profile.AnnualTurnover, "Annual Turnover");
+        Fact(FactFields.LegalStatus, profile.LegalStatus, "Legal Status of Firm");
+        Fact(FactFields.Gstin, profile.Gstin, "GST No.");
+        Fact(FactFields.NatureOfBusiness, profile.NatureOfBusiness, "Nature of Business");
+        Fact(FactFields.YearEstablished, profile.YearEstablished, "Year of Establishment");
+
+        if (profile.CeoName is { } ceo)
+        {
+            Fact(FactFields.OwnerName, ceo, "Company CEO");
+            var isProprietorship = profile.LegalStatus?.Contains("Proprietor", StringComparison.OrdinalIgnoreCase) == true;
+            research.People.Add(new PersonFinding
+            {
+                FullName = ceo,
+                Designation = isProprietorship ? "Proprietor (CEO)" : "CEO",
+                IsOwner = true,
+                IsDecisionMaker = true,
+                SourceUrl = profileUrl,
+                Source = "IndiaMart",
+            });
+        }
+
+        if (profile.ForwardingNumber is { } pns && PhoneNormalizer.Normalize(pns, company.CountryIso2) is { } phone)
+            research.Channels.Add(new ChannelFinding("Phone", pns, phone.E164, "Virtual", phone.IsValid, "IndiaMART call-forwarding number", profileUrl));
+
+        return true;
+    }
+
+    // ---------------- Helpers ----------------
+
+    private async Task ValidateEmailsAsync(CompanyResearch research, CancellationToken ct)
+    {
+        for (var i = 0; i < research.Channels.Count; i++)
+        {
+            var c = research.Channels[i];
+            if (c.Type != "Email" || c.IsValid is not null)
+                continue;
+            var check = await emails.CheckAsync(c.NormalizedValue, ct);
+            research.Channels[i] = c with { IsValid = check.IsValid, Note = check.Note };
+        }
+    }
+
+    /// <summary>Same person from several sources → one entry, keeping the most complete fields.</summary>
+    private static void Deduplicate(CompanyResearch research)
+    {
+        var merged = research.People
+            .GroupBy(p => CompanyText.NormalizeName(StripHonorific(p.FullName)))
+            .Select(g => g.Aggregate((a, b) => a with
+            {
+                Designation = a.Designation ?? b.Designation,
+                IsOwner = a.IsOwner || b.IsOwner,
+                IsDecisionMaker = a.IsDecisionMaker || b.IsDecisionMaker,
+                LinkedInUrl = a.LinkedInUrl ?? b.LinkedInUrl,
+                FacebookUrl = a.FacebookUrl ?? b.FacebookUrl,
+                InstagramUrl = a.InstagramUrl ?? b.InstagramUrl,
+                Phone = a.Phone ?? b.Phone,
+                Email = a.Email ?? b.Email,
+            }))
+            .ToList();
+        research.People.Clear();
+        research.People.AddRange(merged);
+
+        var channels = research.Channels.DistinctBy(c => (c.Type, c.NormalizedValue)).ToList();
+        research.Channels.Clear();
+        research.Channels.AddRange(channels);
+
+        var socials = research.Socials.DistinctBy(s => s.Url.ToLowerInvariant()).ToList();
+        research.Socials.Clear();
+        research.Socials.AddRange(socials);
+    }
+
+    public static string StripHonorific(string name) =>
+        System.Text.RegularExpressions.Regex.Replace(name, @"^(Mr|Mrs|Ms|Dr|Shri|Smt|Er)\.?\s+", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim();
+
+    private static bool IsOwnerRole(string? role) =>
+        role is not null && OwnerRoles.Any(r => role.Contains(r, StringComparison.OrdinalIgnoreCase)) || role?.Trim().Equals("MD", StringComparison.OrdinalIgnoreCase) == true;
+
+    private static bool IsDecisionRole(string? role) =>
+        IsOwnerRole(role) || (role is not null && DecisionRoles.Any(r => System.Text.RegularExpressions.Regex.IsMatch(role, $@"\b{r}\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase)));
+
+    private static string? SocialPlatformOf(string url) => WebsiteClassifier.GetSocialPlatform(url)?.ToString();
+
+    private static string CleanSocialUrl(string url) =>
+        Uri.TryCreate(WebsiteClassifier.StripTracking(url), UriKind.Absolute, out var u) ? u.GetLeftPart(UriPartial.Path).TrimEnd('/') : url;
+}
+
+/// <summary>Decides whether a piece of text is about this company (normalized name contained; generic short names also need the city).</summary>
+public sealed class CompanyMatcher(string companyName, string city)
+{
+    private readonly string _name = CompanyText.NormalizeName(companyName);
+    private readonly string _city = CompanyText.NormalizeName(city);
+    private readonly bool _generic = CompanyText.NormalizeName(companyName).Split(' ').Length <= 2;
+
+    public bool Matches(string text)
+    {
+        if (!NameMatches(text))
+            return false;
+        var t = CompanyText.NormalizeName(text);
+        return !_generic || t.Contains(_city, StringComparison.Ordinal) || _name.Split(' ').Length == 2 && _name.Length >= 12;
+    }
+
+    /// <summary>Name only – for pages whose location is checked separately (e.g. IndiaMART profile city).</summary>
+    public bool NameMatches(string text)
+    {
+        var t = CompanyText.NormalizeName(text);
+        return _name.Length >= 3 && $" {t} ".Contains($" {_name} ", StringComparison.Ordinal);
+    }
+}

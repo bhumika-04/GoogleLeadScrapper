@@ -50,6 +50,9 @@ export type Aspect = {
   startedAt: string | null;
   finishedAt: string | null;
   lastError: string | null;
+  peopleStatus: SearchStatus | null;
+  peopleTotal: number | null;
+  peopleDone: number;
 };
 
 export type SearchDetail = {
@@ -88,6 +91,75 @@ export type Lead = {
   longitude: number | null;
   mapsUrl: string | null;
   foundAt: string;
+  ownerName: string | null;
+  people: string | null;
+  peopleCount: number;
+  teamSize: string | null;
+  turnover: string | null;
+  gstin: string | null;
+  peopleEnrichedAt: string | null;
+  lastEnrichedAt: string | null;
+};
+
+export type Person = {
+  id: number;
+  fullName: string;
+  designation: string | null;
+  isOwner: boolean;
+  isDecisionMaker: boolean;
+  phone: string | null;
+  email: string | null;
+  linkedInUrl: string | null;
+  facebookUrl: string | null;
+  instagramUrl: string | null;
+  source: string | null;
+  sourceUrl: string;
+};
+
+export type Channel = {
+  channelType: "Phone" | "Email";
+  normalizedValue: string;
+  phoneKind: string | null;
+  isValid: boolean | null;
+  validationNote: string | null;
+  sourceUrl: string | null;
+};
+
+export type Fact = { fieldName: string; value: string; sourceUrl: string; quote: string | null; extractedBy: string; foundAt: string };
+
+export type CompanyDetail = {
+  id: number;
+  name: string;
+  category: string | null;
+  address: string | null;
+  website: string | null;
+  mapsUrl: string | null;
+  rating: number | null;
+  reviewCount: number | null;
+  ownerName: string | null;
+  teamSize: string | null;
+  turnover: string | null;
+  gstin: string | null;
+  peopleEnrichedAt: string | null;
+  lastEnrichedAt: string | null;
+  people: Person[];
+  channels: Channel[];
+  socials: { platform: string; url: string }[];
+  facts: Fact[];
+};
+
+export type Platform = "LinkedIn" | "Facebook" | "Instagram" | "IndiaMart" | "Justdial";
+
+export type AccountStatus = "ConnectRequested" | "WaitingForLogin" | "SaveRequested" | "Connected" | "Expired" | "Failed" | "Disconnected";
+
+export type ConnectedAccount = {
+  platform: Platform;
+  status: AccountStatus;
+  accountLabel: string | null;
+  requestedAt: string | null;
+  connectedAt: string | null;
+  lastUsedAt: string | null;
+  lastError: string | null;
 };
 
 export type Paged<T> = { items: T[]; total: number; page: number; pageSize: number };
