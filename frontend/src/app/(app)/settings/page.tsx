@@ -98,6 +98,7 @@ export default function SettingsPage() {
                 {STATUS_TEXT[a.status]}
                 {a.status === "Connected" && a.connectedAt && <> · since {formatUtc(a.connectedAt)}</>}
                 {a.lastUsedAt && <> · last used {formatUtc(a.lastUsedAt)}</>}
+                {a.status === "Connected" && a.platform === "LinkedIn" && <> · <span className="text-ink-dim">{a.usageToday} searches today</span> (daily cap 60)</>}
                 {a.accountLabel && <> · <span className="text-ink-dim">{a.accountLabel}</span></>}
               </div>
               {a.lastError && <p className="rounded-md bg-bad/10 px-2.5 py-1.5 text-xs text-bad">{a.lastError}</p>}

@@ -29,7 +29,8 @@ public sealed record ConnectedAccountDto(
     DateTime? RequestedAt,
     DateTime? ConnectedAt,
     DateTime? LastUsedAt,
-    string? LastError);
+    string? LastError,
+    int UsageToday);
 
 public sealed record ConnectAccountRequest(string? AccountLabel);
 

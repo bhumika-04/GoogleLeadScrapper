@@ -10,47 +10,60 @@ using Microsoft.Extensions.Logging;
 namespace DeepLead.Enrichment.People;
 
 /// <summary>
-/// Stage 2 (no-login sources): finds the owner and core team of a company plus contact channels and social handles.
-/// Every finding carries the URL it came from; nothing is guessed.
-/// Sources: company website (home + contact/about/team pages), one web search for the company,
-/// IndiaMART seller profile, public LinkedIn profile titles in search results.
+/// Stage 2: finds the owner and core team of a company plus contact channels and social handles.
+/// Every finding carries the URL it came from; nothing is guessed. Sources, in order:
+///  1. company website (home + contact/about/team pages) – or its IndiaMART page when that is the "website";
+///  2. IndiaMART seller profile, located by slug guessing (no search engine needed);
+///  3. LinkedIn people search through a connected account (when the tenant connected one);
+///  4. general web search, best-effort, only while nobody has been found (engines block this IP quickly).
 /// </summary>
-public sealed class PeopleDiscovery(IWebSearch search, PageFetcher fetcher, EmailValidator emails, ILogger<PeopleDiscovery> logger)
+public sealed class PeopleDiscovery(IWebSearch search, PageFetcher fetcher, IndiaMartClient indiaMart, EmailValidator emails, ILogger<PeopleDiscovery> logger)
 {
     private const int MaxWebsitePages = 5;
 
     private static readonly string[] OwnerRoles = ["owner", "proprietor", "proprietress", "founder", "ceo", "chief executive", "managing director", "chairman", "chairperson", "managing partner"];
     private static readonly string[] DecisionRoles = ["director", "partner", "head", "president", "vice president", "vp", "general manager", "gm", "cto", "cfo", "coo", "manager"];
 
-    public async Task<CompanyResearch> ResearchAsync(CompanyToResearch company, CancellationToken ct)
+    public async Task<CompanyResearch> ResearchAsync(CompanyToResearch company, CancellationToken ct, ILinkedInLookup? linkedIn = null)
     {
         var research = new CompanyResearch();
         var match = new CompanyMatcher(company.Name, company.City);
 
-        // Many small businesses list their IndiaMART page as "website" on Maps: read it as the IndiaMART profile.
-        if (company.Website is not null && IndiaMartParser.ToProfileUrl(company.Website) is { } ownIndiaMart)
-            await ReadIndiaMartAsync(company, match, ownIndiaMart, research, ct);
-        else if (company.Website is not null)
-            await CrawlWebsiteAsync(company, research, ct);
-
         try
         {
-            // One search for the company itself: finds IndiaMART, LinkedIn people/company, Facebook/Instagram pages.
-            var results = await RunSearchAsync($"\"{company.Name}\" {company.City}", company.CountryIso2, research, ct);
-            await UseSearchResultsAsync(company, match, results, research, ct);
+            // 1. Many small businesses list their IndiaMART page as "website" on Maps: read it as the IndiaMART profile.
+            if (company.Website is not null && IndiaMartParser.ToProfileUrl(company.Website) is { } ownIndiaMart)
+                await ReadIndiaMartAsync(company, match, ownIndiaMart, research, ct);
+            else if (company.Website is not null)
+                await CrawlWebsiteAsync(company, research, ct);
 
-            // Second, LinkedIn-focused search only when we still have nobody.
-            if (research.People.Count == 0)
-            {
-                var linkedIn = await RunSearchAsync($"\"{company.Name}\" {company.City} linkedin", company.CountryIso2, research, ct);
-                await UseSearchResultsAsync(company, match, linkedIn, research, ct);
-            }
+            // 2. IndiaMART by slug guessing.
+            if (!research.Facts.Any(f => f.ExtractedBy == "IndiaMart"))
+                await GuessIndiaMartAsync(company, match, research, ct);
         }
         catch (ScrapeBlockedException ex)
         {
-            // Keep what the website/IndiaMART gave us; the company is retried in a later run.
             research.SearchSkipped = true;
-            logger.LogWarning("Web search skipped for {Company}: {Reason}", company.Name, ex.Message);
+            logger.LogWarning("IndiaMART skipped for {Company}: {Reason}", company.Name, ex.Message);
+        }
+
+        // 3. LinkedIn people search (connected account).
+        if (linkedIn is not null)
+            await SearchLinkedInAsync(company, match, linkedIn, research, ct);
+
+        // 4. General web search, only while we still have nobody.
+        if (research.People.Count == 0)
+        {
+            try
+            {
+                var results = await RunSearchAsync($"\"{company.Name}\" {company.City}", company.CountryIso2, research, ct);
+                await UseSearchResultsAsync(company, match, results, research, ct);
+            }
+            catch (ScrapeBlockedException ex)
+            {
+                research.SearchSkipped = true;
+                logger.LogDebug("Web search skipped for {Company}: {Reason}", company.Name, ex.Message);
+            }
         }
 
         await ValidateEmailsAsync(research, ct);
@@ -155,14 +168,27 @@ public sealed class PeopleDiscovery(IWebSearch search, PageFetcher fetcher, Emai
         }
     }
 
+    // ---------------- IndiaMART ----------------
+
+    private async Task GuessIndiaMartAsync(CompanyToResearch company, CompanyMatcher match, CompanyResearch research, CancellationToken ct)
+    {
+        foreach (var url in IndiaMartClient.GuessProfileUrls(company.Name, company.City))
+        {
+            if (await ReadIndiaMartAsync(company, match, url, research, ct))
+                return;
+        }
+    }
+
+    /// <summary>Reads an IndiaMART seller profile; true only when it is verifiably this company (name + city).</summary>
     private async Task<bool> ReadIndiaMartAsync(CompanyToResearch company, CompanyMatcher match, string profileUrl, CompanyResearch research, CancellationToken ct)
     {
-        var page = await fetcher.GetAsync(profileUrl, ct);
+        var page = await indiaMart.GetProfileAsync(profileUrl, ct);
         if (page is null)
             return false;
         research.PagesVisited++;
+        profileUrl = page.Value.Url;   // sellers with custom pages redirect, e.g. to /aboutus.html
 
-        var profile = IndiaMartParser.Parse(page.Html);
+        var profile = IndiaMartParser.Parse(page.Value.Html);
         // Same company? Name must match, and the city too when IndiaMART states one.
         if (profile.CompanyName is null || !match.NameMatches(profile.CompanyName)
             || (profile.City is not null && !profile.City.Contains(company.City, StringComparison.OrdinalIgnoreCase)
@@ -187,12 +213,12 @@ public sealed class PeopleDiscovery(IWebSearch search, PageFetcher fetcher, Emai
 
         if (profile.CeoName is { } ceo)
         {
-            Fact(FactFields.OwnerName, ceo, "Company CEO");
+            Fact(FactFields.OwnerName, ceo, profile.CeoRole ?? "Company CEO");
             var isProprietorship = profile.LegalStatus?.Contains("Proprietor", StringComparison.OrdinalIgnoreCase) == true;
             research.People.Add(new PersonFinding
             {
                 FullName = ceo,
-                Designation = isProprietorship ? "Proprietor (CEO)" : "CEO",
+                Designation = profile.CeoRole ?? (isProprietorship ? "Proprietor (CEO)" : "CEO"),
                 IsOwner = true,
                 IsDecisionMaker = true,
                 SourceUrl = profileUrl,
@@ -204,6 +230,37 @@ public sealed class PeopleDiscovery(IWebSearch search, PageFetcher fetcher, Emai
             research.Channels.Add(new ChannelFinding("Phone", pns, phone.E164, "Virtual", phone.IsValid, "IndiaMART call-forwarding number", profileUrl));
 
         return true;
+    }
+
+    // ---------------- LinkedIn (connected account) ----------------
+
+    private async Task SearchLinkedInAsync(CompanyToResearch company, CompanyMatcher match, ILinkedInLookup linkedIn, CompanyResearch research, CancellationToken ct)
+    {
+        // Company name only: LinkedIn people search matches it against current-company/headline;
+        // the card's location line ("Indore, Madhya Pradesh") then satisfies the city check for generic names.
+        var keywords = company.Name.Split('|', '–', '—')[0].Trim();
+        var people = await linkedIn.SearchPeopleAsync(keywords, ct);
+        if (people is null)
+            return;
+        research.SearchesRun++;
+
+        foreach (var p in people)
+        {
+            // Keep only people whose card names this company (avoids namesakes and other firms).
+            if (!match.Matches($"{p.Headline} {p.CardText}"))
+                continue;
+            var designation = LinkedInPeopleSearch.DesignationFromHeadline(p.Headline);
+            research.People.Add(new PersonFinding
+            {
+                FullName = p.FullName,
+                Designation = designation,
+                IsOwner = IsOwnerRole(designation),
+                IsDecisionMaker = IsDecisionRole(designation),
+                LinkedInUrl = p.ProfileUrl,
+                SourceUrl = p.ProfileUrl,
+                Source = "LinkedIn",
+            });
+        }
     }
 
     // ---------------- Helpers ----------------

@@ -3,6 +3,7 @@ using DeepLead.Data;
 using DeepLead.Enrichment.People;
 using DeepLead.Enrichment.Validation;
 using DeepLead.Scrapers.Search;
+using DeepLead.Scrapers.Sites;
 using DeepLead.Scrapers.Web;
 using DeepLead.Worker;
 using Serilog;
@@ -28,6 +29,7 @@ builder.Services.AddSingleton(builder.Configuration.GetSection("Scraping").Get<S
 // Stage 2 building blocks (shared so the search rate limit / circuit breaker is global to the worker).
 builder.Services.AddSingleton<IWebSearch, DuckDuckGoSearch>();
 builder.Services.AddSingleton<PageFetcher>();
+builder.Services.AddSingleton<IndiaMartClient>();
 builder.Services.AddSingleton<EmailValidator>();
 builder.Services.AddSingleton<PeopleDiscovery>();
 

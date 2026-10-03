@@ -1,6 +1,7 @@
 using DeepLead.Core;
 using DeepLead.Core.Contracts;
 using DeepLead.Core.Maps;
+using DeepLead.Core.Security;
 using DeepLead.Core.Text;
 using DeepLead.Data;
 using DeepLead.Enrichment.People;
@@ -22,6 +23,15 @@ public sealed class ScrapingOptions
     /// <summary>Stage 2 (owner, core team, contacts, socials). Companies researched within this many days are reused.</summary>
     public bool PeopleStageEnabled { get; init; } = true;
     public int PeopleCacheDays { get; init; } = 30;
+
+    /// <summary>LinkedIn people search with the tenant's connected account (Settings).</summary>
+    public bool LinkedInEnabled { get; init; } = true;
+    /// <summary>Searches per account per UTC day. Free LinkedIn accounts get restricted when they search heavily.</summary>
+    public int LinkedInDailyCap { get; init; } = 60;
+    public int LinkedInMinDelaySeconds { get; init; } = 25;
+    public int LinkedInMaxDelaySeconds { get; init; } = 50;
+    /// <summary>A visible (non-headless) browser is less likely to be flagged by LinkedIn.</summary>
+    public bool LinkedInHeadless { get; init; }
 }
 
 /// <summary>
@@ -34,6 +44,8 @@ public sealed class SearchRunner(
     LeadRepository leads,
     PeopleRepository people,
     PeopleDiscovery discovery,
+    AccountRepository accounts,
+    SecretBox secrets,
     ScrapingOptions options,
     ILoggerFactory loggerFactory,
     ILogger<SearchRunner> logger) : BackgroundService
@@ -78,6 +90,10 @@ public sealed class SearchRunner(
         await using var browser = await BrowserSession.StartAsync(new BrowserOptions { Headless = options.Headless });
         var scraper = new GoogleMapsScraper(browser, loggerFactory.CreateLogger<GoogleMapsScraper>());
 
+        // The tenant's LinkedIn account (if connected) is opened lazily on the first Stage 2 lookup.
+        await using var linkedIn = new WorkerLinkedInLookup(search.TenantId, accounts, secrets, options, logger);
+        _linkedIn = linkedIn;
+
         var failed = 0;
         foreach (var aspect in aspects)
         {
@@ -96,6 +112,9 @@ public sealed class SearchRunner(
     }
 
     private enum AspectOutcome { Completed, Failed, Stopped }
+
+    // The runner handles one session at a time, so the current run's LinkedIn lookup can live in a field.
+    private WorkerLinkedInLookup? _linkedIn;
 
     private async Task<AspectOutcome> RunAspectWithRetryAsync(SearchRunInfo search, AspectRunInfo aspect, GoogleMapsScraper scraper, CancellationToken ct)
     {
@@ -199,7 +218,7 @@ public sealed class SearchRunner(
 
             try
             {
-                var research = await discovery.ResearchAsync(company, ct);
+                var research = await discovery.ResearchAsync(company, ct, _linkedIn);
                 await people.SaveResearchAsync(company.CompanyId, research, ct);
                 if (research.SearchSkipped)
                     partial++;

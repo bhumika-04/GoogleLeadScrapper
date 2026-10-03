@@ -85,7 +85,8 @@ static async Task<int> RunPeopleAsync(Dictionary<string, string?> o)
     using var loggerFactory = LoggerFactory.Create(b => b.AddSimpleConsole(c => c.SingleLine = true).SetMinimumLevel(LogLevel.Information));
     using var search = new DeepLead.Scrapers.Search.DuckDuckGoSearch();
     using var fetcher = new DeepLead.Scrapers.Web.PageFetcher();
-    var discovery = new DeepLead.Enrichment.People.PeopleDiscovery(search, fetcher, new DeepLead.Enrichment.Validation.EmailValidator(),
+    using var indiaMart = new DeepLead.Scrapers.Sites.IndiaMartClient();
+    var discovery = new DeepLead.Enrichment.People.PeopleDiscovery(search, fetcher, indiaMart, new DeepLead.Enrichment.Validation.EmailValidator(),
         loggerFactory.CreateLogger<DeepLead.Enrichment.People.PeopleDiscovery>());
 
     var research = await discovery.ResearchAsync(

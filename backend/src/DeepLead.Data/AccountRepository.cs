@@ -9,7 +9,8 @@ public sealed class AccountRepository(SqlConnectionFactory db)
     {
         await using var c = await db.OpenAsync();
         var rows = (await c.QueryAsync<ConnectedAccountDto>("""
-            SELECT Platform, Status, AccountLabel, RequestedAt, ConnectedAt, LastUsedAt, LastError
+            SELECT Platform, Status, AccountLabel, RequestedAt, ConnectedAt, LastUsedAt, LastError,
+                   CASE WHEN UsageDate = CAST(SYSUTCDATETIME() AS DATE) THEN UsageCount ELSE 0 END AS UsageToday
             FROM dbo.ConnectedAccounts WHERE TenantId = @tenantId
             """, new { tenantId })).ToDictionary(r => r.Platform);
 
@@ -17,7 +18,7 @@ public sealed class AccountRepository(SqlConnectionFactory db)
         return Platforms.All
             .Select(p => rows.TryGetValue(p, out var row)
                 ? row
-                : new ConnectedAccountDto(p, AccountStatus.Disconnected, null, null, null, null, null))
+                : new ConnectedAccountDto(p, AccountStatus.Disconnected, null, null, null, null, null, 0))
             .ToList();
     }
 
@@ -116,6 +117,29 @@ public sealed class AccountRepository(SqlConnectionFactory db)
             OUTPUT INSERTED.SessionState
             WHERE TenantId = @tenantId AND Platform = @platform AND Status = 'Connected'
             """, new { tenantId, platform });
+    }
+
+    /// <summary>Atomically takes one unit of today's quota (UTC day). False when the cap is reached.</summary>
+    public async Task<bool> TryConsumeDailyQuotaAsync(int tenantId, string platform, int dailyCap, CancellationToken ct)
+    {
+        await using var c = await db.OpenAsync(ct);
+        return await c.ExecuteAsync("""
+            UPDATE dbo.ConnectedAccounts
+            SET UsageCount = CASE WHEN UsageDate = CAST(SYSUTCDATETIME() AS DATE) THEN UsageCount + 1 ELSE 1 END,
+                UsageDate = CAST(SYSUTCDATETIME() AS DATE)
+            WHERE TenantId = @tenantId AND Platform = @platform AND Status = 'Connected'
+              AND (UsageDate IS NULL OR UsageDate <> CAST(SYSUTCDATETIME() AS DATE) OR UsageCount < @dailyCap)
+            """, new { tenantId, platform, dailyCap }) == 1;
+    }
+
+    /// <summary>Sites rotate cookies while we browse; keep the stored session fresh.</summary>
+    public async Task UpdateSessionAsync(int tenantId, string platform, byte[] encryptedState, CancellationToken ct)
+    {
+        await using var c = await db.OpenAsync(ct);
+        await c.ExecuteAsync("""
+            UPDATE dbo.ConnectedAccounts SET SessionState = @encryptedState, UpdatedAt = SYSUTCDATETIME()
+            WHERE TenantId = @tenantId AND Platform = @platform AND Status = 'Connected'
+            """, new { tenantId, platform, encryptedState });
     }
 
     public async Task MarkExpiredAsync(int tenantId, string platform, string reason, CancellationToken ct)

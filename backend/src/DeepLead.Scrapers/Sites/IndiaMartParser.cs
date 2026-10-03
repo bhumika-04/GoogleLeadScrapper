@@ -7,6 +7,8 @@ namespace DeepLead.Scrapers.Sites;
 public sealed record IndiaMartProfile(
     string? CompanyName,
     string? CeoName,
+    /// <summary>Role IndiaMART states with the name ("Owner", "Director"); null when it's the factsheet "Company CEO".</summary>
+    string? CeoRole,
     string? Employees,
     string? AnnualTurnover,
     string? LegalStatus,
@@ -23,8 +25,15 @@ public static partial class IndiaMartParser
     [GeneratedRegex(@"^https?://(?:www\.)?indiamart\.com/([a-z0-9\-]+)/", RegexOptions.IgnoreCase)]
     private static partial Regex SellerUrl();
 
-    [GeneratedRegex("\"pnsNumber\"\\s*:\\s*\"([+\\d\\- ]{8,20})\"")]
+    [GeneratedRegex("\"(?:pnsNumber|sellerPns)\"\\s*:\\s*\"([+\\d\\- ]{8,20})\"")]
     private static partial Regex PnsNumber();
+
+    // Verified-supplier block on custom seller pages: "directorProprietor":"Rinku Sharma (Owner)" (often HTML-escaped).
+    [GeneratedRegex("\"directorProprietor\"\\s*:\\s*\"([^\"]{3,120})\"")]
+    private static partial Regex DirectorProprietor();
+
+    [GeneratedRegex(@"^(?<name>.+?)\s*\((?<role>[^)]{2,40})\)\s*$")]
+    private static partial Regex NameWithRole();
 
     private static readonly HashSet<string> NonSellerSlugs = new(StringComparer.OrdinalIgnoreCase)
         { "proddetail", "search", "impcat", "city", "catalog", "cgi", "enquiry" };
@@ -76,10 +85,23 @@ public static partial class IndiaMartParser
 
         string? Get(params string[] labels) => labels.Select(l => facts.GetValueOrDefault(l)).FirstOrDefault(v => v is not null);
 
-        var pns = PnsNumber().Match(html);
+        var decoded = System.Net.WebUtility.HtmlDecode(html);
+        var pns = PnsNumber().Match(decoded);
+
+        string? ownerRole = null;
+        var ceo = Get("Company CEO", "CEO", "Proprietor", "Owner", "Partner", "Director", "Managing Director");
+        if (ceo is null && DirectorProprietor().Match(decoded) is { Success: true } dp)
+        {
+            var value = dp.Groups[1].Value.Trim();
+            var nr = NameWithRole().Match(value);
+            ceo = nr.Success ? nr.Groups["name"].Value.Trim() : value;
+            ownerRole = nr.Success ? nr.Groups["role"].Value.Trim() : null;
+        }
+
         return new IndiaMartProfile(
             CompanyName: companyName,
-            CeoName: Get("Company CEO", "CEO", "Proprietor", "Owner", "Partner", "Director", "Managing Director"),
+            CeoName: ceo,
+            CeoRole: ownerRole,
             Employees: Get("Total Number of Employees", "Number of Employees"),
             AnnualTurnover: Get("Annual Turnover"),
             LegalStatus: Get("Legal Status of Firm"),

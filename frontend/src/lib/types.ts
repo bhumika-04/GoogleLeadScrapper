@@ -160,6 +160,7 @@ export type ConnectedAccount = {
   connectedAt: string | null;
   lastUsedAt: string | null;
   lastError: string | null;
+  usageToday: number;
 };
 
 export type Paged<T> = { items: T[]; total: number; page: number; pageSize: number };

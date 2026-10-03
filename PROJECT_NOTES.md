@@ -239,8 +239,18 @@ Tenants, Users, Roles, Countries, Cities, Languages, CountryLanguages, Searches,
   - Live test Indore: Burhani Offset Printers -> owner H Barodawala (Proprietor), Upto 10 people, GSTIN, est. 1997 (IndiaMART);
     Singh PhotoCopy -> 6 phones + email from website. DDG blocked throughout -> no LinkedIn people found in this test.
   - 38 unit tests (parsers, matcher, phones). Bugs found by tests/live runs and fixed: glued page text corrupting emails, '+' lost in tel: links.
-- Next (needs owner decision on search source): use connected LinkedIn/Facebook sessions for owner/team search; IndiaMART search via browser;
-  full-list Maps test (~120 cap) + area splitting; user management.
+- 2026-10-03: Owner chose options 1+2. Built:
+  - **IndiaMART without search**: IndiaMART's own search returns nothing to automated browsers, so the seller page is found by
+    slug guessing (`jai-ma-graphics`, `jaimagraphics`, `jai-ma-graphics-indore`) and verified by name + city. Paced client
+    (~7 s, 429 -> 10 min cool-down). Owner also read from the verified-supplier block ("directorProprietor": "Rinku Sharma (Owner)").
+    Live: owners found for 3/6 Indore companies with zero search-engine use (L Gupta, S Bhargava, H Barodawala) + Jai Ma Graphics -> Rinku Sharma.
+  - **LinkedIn people search with the connected account** (migration 0008: daily usage counter): one search per company,
+    25–50 s pacing, daily cap 60, visible browser by default, cookies re-saved after each search, login wall -> account marked Expired.
+    Markup-agnostic extraction (profile links + card text); kept only when the card names the company. Empty result pages are
+    snapshotted to `logs/linkedin/` for diagnosis. **Not yet verified against a real LinkedIn account** – owner to connect one.
+  - Order per company: website / own IndiaMART page -> IndiaMART guess -> LinkedIn -> web search (only if still nobody).
+- Next: owner connects a dedicated LinkedIn account and runs a session (verify extraction); Facebook page search; full-list Maps test
+  (~120 cap) + area splitting; user management.
 
 ## 12. Decisions Log
 - 2026-10-01: Requirements answers received; stack proposal drafted (section 7).

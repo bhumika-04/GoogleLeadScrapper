@@ -75,6 +75,46 @@ public class SiteParserTests
         Assert.Equal("+91-8047309871", p.ForwardingNumber);
     }
 
+    [Fact]
+    public void IndiaMart_ReadsOwnerFromVerifiedSupplierBlock()
+    {
+        const string html = """
+            <div data-props="{&quot;gstNumber&quot;:&quot;23BYWPP1952R1ZE&quot;,&quot;directorProprietor&quot;:&quot;Rinku Sharma (Owner)&quot;,&quot;sellerPns&quot;:&quot;+91-8047822032&quot;}"></div>
+            """;
+        var p = IndiaMartParser.Parse(html);
+        Assert.Equal("Rinku Sharma", p.CeoName);
+        Assert.Equal("Owner", p.CeoRole);
+        Assert.Equal("+91-8047822032", p.ForwardingNumber);
+    }
+
+    [Theory]
+    [InlineData("Jai Ma Graphics", "Indore", "jai-ma-graphics", "jaimagraphics")]
+    [InlineData("Aadinath Print O Pack – packaging printing | offset printing", "Indore", "aadinath-print-o-pack", "aadinathprintopack")]
+    [InlineData("Shree Graphics & Printing Press", "Indore", "shree-graphics-and-printing-press", "shree-graphics-and-printing-press-indore")]
+    [InlineData("Saraswati Printing Press, Indore", "Indore", "saraswati-printing-press", "saraswatiprintingpress")]
+    public void IndiaMart_GuessesSlugs(string name, string city, string first, string second)
+    {
+        var urls = IndiaMartClient.GuessProfileUrls(name, city);
+        Assert.Equal($"https://www.indiamart.com/{first}/profile.html", urls[0]);
+        Assert.Equal($"https://www.indiamart.com/{second}/profile.html", urls[1]);
+    }
+
+    [Theory]
+    [InlineData("Owner at Jai Ma Graphics", "Owner")]
+    [InlineData("Managing Director @ Allied Paper | Print solutions", "Managing Director")]
+    [InlineData("Printing & packaging entrepreneur", "Printing & packaging entrepreneur")]
+    public void LinkedIn_DesignationFromHeadline(string headline, string expected) =>
+        Assert.Equal(expected, LinkedInPeopleSearch.DesignationFromHeadline(headline));
+
+    [Fact]
+    public void LinkedIn_CardLinesSkipNoise()
+    {
+        var p = LinkedInPeopleSearch.ToPerson("https://www.linkedin.com/in/rinku-sharma", "Rinku Sharma",
+            ["Rinku Sharma", "View Rinku Sharma’s profile", "• 2nd", "2nd degree connection", "Owner at Jai Ma Graphics", "Indore, Madhya Pradesh, India", "Connect"]);
+        Assert.Equal("Owner at Jai Ma Graphics", p.Headline);
+        Assert.Equal("Indore, Madhya Pradesh, India", p.Location);
+    }
+
     [Theory]
     [InlineData("https://www.indiamart.com/burhani-offset-printers/", "https://www.indiamart.com/burhani-offset-printers/profile.html")]
     [InlineData("https://www.indiamart.com/burhani-offset-printers/calendar-printing.html", "https://www.indiamart.com/burhani-offset-printers/profile.html")]
